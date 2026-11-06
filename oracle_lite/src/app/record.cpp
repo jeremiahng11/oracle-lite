@@ -13,6 +13,7 @@
 #include "wav_payload.h"
 #include "../../sounds.h"
 #include "minutes.h"
+#include "battery.h"
 #include <atomic>
 #include <algorithm>
 #include <cmath>
@@ -367,7 +368,7 @@ bool recordMeeting(const char* path, uint32_t& durationMs, void (*onFlushed)(uin
 
   uint32_t totalMono = 0;
   const uint32_t t0 = millis();
-  uint32_t lastCheckpoint = t0, lastScreen = t0;
+  uint32_t lastCheckpoint = t0, lastScreen = t0, lastBatteryCheck = t0;
   bool stopArmed = digitalRead(BTN_REC) == HIGH;   // wait for the tap to end
   uint32_t stopDownSince = 0;
   bool audioOk = true;
@@ -398,6 +399,15 @@ bool recordMeeting(const char* path, uint32_t& durationMs, void (*onFlushed)(uin
       if (used >= total || total - used < 8ULL * 1024ULL * 1024ULL) {
         Serial.println("[Meeting] stopping: SD card is nearly full");
         break;
+      }
+      // Save the recording properly before the battery gives out.
+      if (now - lastBatteryCheck >= 60000UL) {
+        lastBatteryCheck = now;
+        const BatteryReading battery = readBattery();
+        if (battery.valid && battery.percent >= 0 && battery.percent <= 3) {
+          Serial.printf("[Meeting] stopping: battery %d%%\n", battery.percent);
+          break;
+        }
       }
     }
     if (now - t0 >= kMaxMeetingMs) {

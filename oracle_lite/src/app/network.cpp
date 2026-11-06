@@ -2410,7 +2410,7 @@ static void handleFirmwareUploadChunk() {
     otaShownPercent = -1;
     otaMarkerPos = 0;
     Serial.printf("[OTA] receiving %s\n", upload.filename.c_str());
-    showMeetingStatus("UPDATING", 0, "RECEIVING");
+    showAskProgress("UPDATING", "FIRMWARE");
     if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) otaError = Update.errorString();
   } else if (upload.status == UPLOAD_FILE_WRITE) {
     if (otaError.length()) return;
@@ -2439,7 +2439,9 @@ static void handleFirmwareUploadChunk() {
       const int percent = (int)((uint64_t)upload.totalSize * 100 / total);
       if (percent / 20 != otaShownPercent / 20) {
         otaShownPercent = percent;
-        showMeetingStatus("UPDATING", percent, "DON'T SWITCH OFF");
+        char object[24];
+        snprintf(object, sizeof(object), "FIRMWARE %d%%", percent);
+        showAskProgress("UPDATING", object);
       }
     }
   } else if (upload.status == UPLOAD_FILE_END) {
@@ -2466,7 +2468,7 @@ static void handleFirmwareUploadDone() {
   }
   transferServer.sendHeader("Connection", "close");
   transferServer.send(200, "text/plain", "Updated. Oracle Lite is restarting…");
-  showMeetingStatus("UPDATED", 100, "RESTARTING");
+  showAskProgress("UPDATED", "RESTARTING");
   delay(1200);
   ESP.restart();
 }

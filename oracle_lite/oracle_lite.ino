@@ -1090,6 +1090,32 @@ void recordMeetingMinutes() {
     returnToReady();
     return;
   }
+  // Low-battery guard: a meeting can run for hours.
+  {
+    const BatteryReading battery = readBattery();
+    if (battery.valid && battery.percent >= 0 && battery.percent < 5) {
+      showError("CHARGE FIRST");
+      delay(1800);
+      returnToReady();
+      return;
+    }
+    if (battery.valid && battery.percent >= 0 && battery.percent < 25) {
+      // Warn, then wait: top (or no answer) records anyway, bottom cancels.
+      showMeetingStatus("BATTERY LOW", battery.percent, "TOP GO / BOTTOM STOP");
+      soundBack();
+      clearLatchedPresses();
+      const uint32_t askedAt = millis();
+      bool cancel = false;
+      while (millis() - askedAt < 8000UL) {
+        if (upperPressLatched) break;
+        if (lowerPressLatched) { cancel = true; break; }
+        delay(20);
+      }
+      while (!bothButtonsUp()) delay(10);
+      clearLatchedPresses();
+      if (cancel) { returnToReady(); return; }
+    }
+  }
   const int num = nextNoteNumber();
   if (num <= 0) { showError("STORAGE ERROR"); delay(1400); returnToReady(); return; }
   char path[64];
