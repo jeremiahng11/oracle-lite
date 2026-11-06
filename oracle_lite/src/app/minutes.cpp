@@ -767,7 +767,7 @@ String oracleQaText(const String& question, const String& answer) {
   q.trim();
   if (!q.length()) return answer;
   const bool german = oracleUiLanguage() == "de";
-  return String(german ? "Frage: " : "Question: ") + q + "\n" + (german ? "Antwort: " : "Answer: ") + answer;
+  return String(german ? "FRAGE: " : "QUESTION: ") + q + "\n" + (german ? "ANTWORT: " : "ANSWER: ") + answer;
 }
 
 // ─── Spoken web question through /api/voice ────────────────────────────────

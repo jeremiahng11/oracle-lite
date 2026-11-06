@@ -662,7 +662,7 @@ void showAskSpeakingPage(const String& answer, int sourceCount, int page) {
   snprintf(pageLabel, sizeof(pageLabel), "%d/%d", page + 1, pages);
   drawHeader(pageLabel, BLACK);
   // Web questions carry their own "Question:" / "Answer:" labels.
-  const bool questionAndAnswer = answer.startsWith("Question: ") || answer.startsWith("Frage: ");
+  const bool questionAndAnswer = answer.startsWith("QUESTION: ") || answer.startsWith("FRAGE: ");
   labelLeft(kContentTop, sourceCount > 0 ? uiText("AUS ERINNERUNGEN", "FROM MEMORY")
                          : questionAndAnswer ? uiText("WEBSUCHE", "WEB SEARCH")
                          : uiText("ANTWORT", "ANSWER"), 1, BLACK);

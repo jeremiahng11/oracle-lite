@@ -47,7 +47,7 @@ bool oracleServerTts(const String& text, const char* outputPath);
 // Spoken question answered by the Oracle server in one trip (POST /api/voice):
 // the server may search the web; its voice plays while it streams in. The
 // upper button stops the answer. Leaves the full answer on screen.
-// "Question: ...\nAnswer: ..." for the answer screens.
+// "QUESTION: ...\nANSWER: ..." for the answer screens.
 String oracleQaText(const String& question, const String& answer);
 bool oracleVoiceAsk(const char* wavPath, String& question, String& answer, String& error);
 
