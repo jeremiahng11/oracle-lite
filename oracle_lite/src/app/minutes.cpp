@@ -760,6 +760,16 @@ bool oracleServerTts(const String& text, const char* outputPath) {
   return ok;
 }
 
+// What the screen shows for a web question: the question that was heard,
+// then the answer.
+String oracleQaText(const String& question, const String& answer) {
+  String q = question;
+  q.trim();
+  if (!q.length()) return answer;
+  const bool german = oracleUiLanguage() == "de";
+  return String(german ? "Frage: " : "Question: ") + q + "\n" + (german ? "Antwort: " : "Answer: ") + answer;
+}
+
 // ─── Spoken web question through /api/voice ────────────────────────────────
 // One trip: the WAV goes up, the reply streams back as lines:
 //   T {"text"} what was heard   P {"text"} answer sentence   B <base64> voice
@@ -1042,7 +1052,7 @@ int readVoiceReply(Client& client, uint32_t startedAt, uint32_t uploadedAt,
                               reinterpret_cast<const uint8_t*>(text.c_str()), text.length()) != 0) return;
     if (!player.feed(decoded.data(), decodedLength)) playbackFailed = true;
     if (!shown && stream.ready()) {
-      shownText = partialAnswer.length() ? partialAnswer : question;
+      shownText = oracleQaText(question, partialAnswer);
       showAskSpeaking(shownText, 0);
       shown = true;
       audioPlaying = true;
@@ -1116,8 +1126,8 @@ int readVoiceReply(Client& client, uint32_t startedAt, uint32_t uploadedAt,
   answer.trim();
   const bool complete = ended || response.done();
   if (streamReady && complete && !shown && player.hasAudio()) {
-    shownText = answer;
-    showAskSpeaking(answer, 0);
+    shownText = oracleQaText(question, answer);
+    showAskSpeaking(shownText, 0);
     shown = true;
     audioPlaying = true;
   }
@@ -1139,7 +1149,7 @@ int readVoiceReply(Client& client, uint32_t startedAt, uint32_t uploadedAt,
     Serial.printf("[Voice] reply had no answer (%d lines) %s\n", lineCount, serverError.c_str());
   }
   // Leave the complete answer on screen for paging.
-  if (answer.length() && shownText != answer) showAskSpeaking(answer, 0);
+  if (answer.length() && shownText != oracleQaText(question, answer)) showAskSpeaking(oracleQaText(question, answer), 0);
   return 200;
 }
 

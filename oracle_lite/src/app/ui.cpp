@@ -289,9 +289,25 @@ const char* askPhaseCopy(const char* action) {
   return uiText("DENKE NACH", "THINKING");
 }
 
+static void wrapParagraph(const String& raw, std::vector<String>& lines);
+
+// Lines for answer pages. A '\n' in the text starts a new line (used for
+// "Question: ..." / "Answer: ...").
 std::vector<String> answerLines(const String& raw) {
-  const String text = normalizeForDisplay(raw);
   std::vector<String> lines;
+  int start = 0;
+  while (start <= static_cast<int>(raw.length())) {
+    int end = raw.indexOf('\n', start);
+    if (end < 0) end = raw.length();
+    wrapParagraph(raw.substring(start, end), lines);
+    start = end + 1;
+  }
+  if (lines.empty()) lines.push_back(uiText("KEINE ANTWORT", "NO ANSWER"));
+  return lines;
+}
+
+static void wrapParagraph(const String& raw, std::vector<String>& lines) {
+  const String text = normalizeForDisplay(raw);
   String line;
   int pos = 0;
   while (pos < static_cast<int>(text.length())) {
@@ -313,8 +329,6 @@ std::vector<String> answerLines(const String& raw) {
     else { if (line.length()) lines.push_back(line); line = word; }
   }
   if (line.length()) lines.push_back(line);
-  if (lines.empty()) lines.push_back(uiText("KEINE ANTWORT", "NO ANSWER"));
-  return lines;
 }
 
 String homeDateLabel() {

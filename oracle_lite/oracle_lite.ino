@@ -1315,7 +1315,8 @@ bool askOneWebQuestion() {
         oracleTextAsk(question, answer, error)) {
       answered = true;
       showAskProgress("BUILDING", "VOICE");
-      if (!playBrainSpeech(answer, NOTES_DIR "/.webanswer.wav", 0)) showAskSpeaking(answer, 0);
+      playBrainSpeech(answer, NOTES_DIR "/.webanswer.wav", 0);
+      showAskSpeaking(oracleQaText(question, answer), 0);
     }
   }
   stopWifi();
@@ -1325,7 +1326,8 @@ bool askOneWebQuestion() {
     return false;
   }
   oracleVoiceHistoryAdd(question, answer);
-  return browseAnswerPages(answer, 0, true);
+  // The voice reply already left "Question / Answer" page one on screen.
+  return browseAnswerPages(oracleQaText(question, answer), 0, true);
 }
 
 // Briefings are composed on the device (instant). Wi-Fi is only needed for
