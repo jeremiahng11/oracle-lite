@@ -3,7 +3,7 @@
 Voice notes, meeting minutes and web answers on an ESP32-S3 e-paper device. Setup Wi-Fi AP: `Oracle Lite`, password `Ora-XXXXXXXX` (shown on screen).
 The HTTPS trust store `certs/oracle_ca_bundle.pem` now carries 17 common public roots (Google Trust Services, Let's Encrypt, DigiCert, GlobalSign, SSL.com, Sectigo/USERTrust, Amazon) so a CA rotation at api.openai.com does not break Ask.
 
-Firmware version: see `version.txt` . Each `pio run -t upload` raises the rc number for the next build (`scripts/version.py`).
+Firmware version: see `version.txt`. Each `pio run -t upload` raises the rc number for the next build (`scripts/version.py`).
 
 ## Hardware
 
@@ -38,12 +38,43 @@ both buttons to open the Web Companion (Wi-Fi `Oracle Lite`) and enter your
 Wi-Fi details and your own OpenAI API key in Setup. The supplied source
 contains no personal credentials. Settings are stored on the device.
 
-Hold the upper button to record a memory; release it to save. Hold the lower
-button to ask a question. Press the lower button during a memory recording to
-add a Moment. Double-press the upper button for the daily briefing or the lower
-button for the weekly briefing. Hold both buttons for three seconds to open
-or close the Web Companion. Offline memories stay on the SD card for later
-processing.
+### Buttons
+
+| Button | Press | Action |
+| --- | --- | --- |
+| Top | hold | Record a memory (release to save) |
+| Top | 2× | Record meeting minutes, streamed live to Oracle Minutes (top again to stop) |
+| Top | 3× | Daily briefing |
+| Bottom | 1× | Appointments |
+| Bottom | hold | Ask a question (e.g. "What appointments do I have next week?") |
+| Bottom | 2× | Weekly briefing |
+| Bottom | 3× | Ask the web by voice (hold bottom on the answer for a follow-up) |
+| Both | hold 3 s | Open or close the Web Companion |
+
+Agenda questions understand "today", "tomorrow", "this/next week", "this
+weekend", "on Friday", "on 6th November", "in December", "this/next month" and
+names ("When do I meet San?"). Briefings are built on the device, so they are
+instant and show as text even without Wi-Fi.
+
+Timed appointments get a spoken reminder 15 minutes before; Oracle wakes
+itself from sleep for it and goes back to sleep afterwards. A meeting started
+below 25 % battery asks first (top = record anyway, bottom = cancel) and a
+meeting stops and saves itself at 3 %.
+
+### Firmware update over Wi-Fi
+
+Run `pio run -t ota`. It builds `ota/oracle-lite-<version>.bin` and raises the
+version. Open the Web Companion → Setup → Update firmware, choose that file and
+upload. Oracle checks the file is an Oracle Lite image, installs it and
+restarts. A failed upload leaves the running firmware untouched.
+
+### Saved secrets
+
+Wi-Fi passwords and API keys are encrypted with a key that is created on the
+first start and burned into a spare eFuse key block of the ESP32-S3 (HMAC
+purpose, read-protected). This uses one of the chip's six key blocks
+permanently; USB flashing is unaffected. Optional build-time defaults go in
+`oracle_lite/secrets.h` (copy `secrets.example.h`; it is git-ignored).
 
 Recordings and transcripts are stored on the SD card under `/notes`. Back up
 that directory before experimenting with storage formats. Keep the local portal
