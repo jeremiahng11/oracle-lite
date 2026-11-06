@@ -1,8 +1,5 @@
 #include "settings.h"
 #include <Preferences.h>
-#include "nvs.h"
-#include <vector>
-#include <algorithm>
 #include "notes.h"
 #include "settings_pair.h"
 
@@ -39,67 +36,8 @@ static bool storeLegacyWifi(const OracleWifiProfile& profile) {
     [&](bool secret, const String& text) { prefs.putString(secret ? "wifi_pass" : "wifi_ssid", text); });
 }
 
-// One-time move of settings saved by builds before the Oracle Lite rename
-// (Wi-Fi networks, keys, voice, language). Copies every entry into the new
-// namespace, then erases the old one. Safe to delete in a later release.
-static const char* kLegacyNamespace = "pala";
-static void migrateLegacySettings() {
-  nvs_handle_t from, to;
-  if (nvs_open(kLegacyNamespace, NVS_READONLY, &from) != ESP_OK) return;
-  if (nvs_open("oracle", NVS_READWRITE, &to) != ESP_OK) { nvs_close(from); return; }
-  int copied = 0;
-  nvs_iterator_t it = nullptr;
-  esp_err_t res = nvs_entry_find(NVS_DEFAULT_PART_NAME, kLegacyNamespace, NVS_TYPE_ANY, &it);
-  while (res == ESP_OK) {
-    nvs_entry_info_t info;
-    nvs_entry_info(it, &info);
-    switch (info.type) {
-      case NVS_TYPE_U8:  { uint8_t v;  if (nvs_get_u8(from, info.key, &v) == ESP_OK)  nvs_set_u8(to, info.key, v);  break; }
-      case NVS_TYPE_I8:  { int8_t v;   if (nvs_get_i8(from, info.key, &v) == ESP_OK)  nvs_set_i8(to, info.key, v);  break; }
-      case NVS_TYPE_U16: { uint16_t v; if (nvs_get_u16(from, info.key, &v) == ESP_OK) nvs_set_u16(to, info.key, v); break; }
-      case NVS_TYPE_I16: { int16_t v;  if (nvs_get_i16(from, info.key, &v) == ESP_OK) nvs_set_i16(to, info.key, v); break; }
-      case NVS_TYPE_U32: { uint32_t v; if (nvs_get_u32(from, info.key, &v) == ESP_OK) nvs_set_u32(to, info.key, v); break; }
-      case NVS_TYPE_I32: { int32_t v;  if (nvs_get_i32(from, info.key, &v) == ESP_OK) nvs_set_i32(to, info.key, v); break; }
-      case NVS_TYPE_U64: { uint64_t v; if (nvs_get_u64(from, info.key, &v) == ESP_OK) nvs_set_u64(to, info.key, v); break; }
-      case NVS_TYPE_I64: { int64_t v;  if (nvs_get_i64(from, info.key, &v) == ESP_OK) nvs_set_i64(to, info.key, v); break; }
-      case NVS_TYPE_STR: {
-        size_t len = 0;
-        if (nvs_get_str(from, info.key, nullptr, &len) == ESP_OK && len) {
-          std::vector<char> buf(len);
-          if (nvs_get_str(from, info.key, buf.data(), &len) == ESP_OK) nvs_set_str(to, info.key, buf.data());
-          std::fill(buf.begin(), buf.end(), 0);
-        }
-        break;
-      }
-      case NVS_TYPE_BLOB: {
-        size_t len = 0;
-        if (nvs_get_blob(from, info.key, nullptr, &len) == ESP_OK && len) {
-          std::vector<uint8_t> buf(len);
-          if (nvs_get_blob(from, info.key, buf.data(), &len) == ESP_OK) nvs_set_blob(to, info.key, buf.data(), len);
-        }
-        break;
-      }
-      default: break;
-    }
-    copied++;
-    res = nvs_entry_next(&it);
-  }
-  nvs_release_iterator(it);
-  const bool ok = nvs_commit(to) == ESP_OK;
-  nvs_close(to);
-  nvs_close(from);
-  if (ok && copied) {
-    nvs_handle_t old;
-    if (nvs_open(kLegacyNamespace, NVS_READWRITE, &old) == ESP_OK) {
-      nvs_erase_all(old); nvs_commit(old); nvs_close(old);
-    }
-    Serial.printf("[Settings] Moved %d saved settings to Oracle Lite\n", copied);
-  }
-}
-
 void oracleSettingsBegin() {
   if (ready) return;
-  migrateLegacySettings();
   ready = prefs.begin("oracle", false);
   if (!ready) return;
   // Migrate the original single-network setting without losing it.

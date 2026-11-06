@@ -25,6 +25,7 @@
 #include "battery.h"
 #include "tasks.h"
 #include "task_visibility.h"
+#include "agenda_range.h"
 #include "viewer_i18n.h"
 #include "memory_response.h"
 #include "http_response.h"
@@ -998,139 +999,151 @@ static String agendaStamp(const BrainTaskRecord& item, bool german) {
 
 bool answerAgendaQuestion(const String& question, String& answer, std::vector<int>& sourceNotes) {
   if (oracleUiLanguage() != "de" && oracleUiLanguage() != "en") return false;
-  String lower = question;
-  lower.toLowerCase();
-  const bool todayIntent = lower.indexOf("heute") >= 0 || lower.indexOf("today") >= 0;
-  const bool tomorrowIntent = lower.indexOf("morgen") >= 0 || lower.indexOf("tomorrow") >= 0;
-  bool upcomingIntent = lower.indexOf("kommend") >= 0 || lower.indexOf("ansteh") >= 0 ||
-                        lower.indexOf("naechst") >= 0 || lower.indexOf("nächst") >= 0 ||
-                        lower.indexOf("upcoming") >= 0 || lower.indexOf("next event") >= 0;
-  const bool pastIntent = lower.indexOf("vergangen") >= 0 || lower.indexOf("vorbei") >= 0 ||
-                          lower.indexOf("frueher") >= 0 || lower.indexOf("früher") >= 0 ||
-                          lower.indexOf("past event") >= 0 || lower.indexOf("previous event") >= 0;
-  const bool taskIntent = lower.indexOf("aufgab") >= 0 || lower.indexOf("todo") >= 0 ||
-                          lower.indexOf("to-do") >= 0 || lower.indexOf("task") >= 0 ||
-                          lower.indexOf("erledig") >= 0;
-  const bool eventIntent = lower.indexOf("termin") >= 0 || lower.indexOf("meeting") >= 0 ||
-                           lower.indexOf("event") >= 0 || lower.indexOf("appointment") >= 0;
-  if (!taskIntent && !eventIntent) return false;
-  // "What was decided in today's meeting?" is about recorded minutes, not the calendar.
-  if (lower.indexOf("minute") >= 0 || lower.indexOf("protokoll") >= 0 || lower.indexOf("discuss") >= 0 ||
-      lower.indexOf("decid") >= 0 || lower.indexOf("action item") >= 0 || lower.indexOf("besproch") >= 0 ||
-      lower.indexOf("said") >= 0 || lower.indexOf("talk") >= 0) return false;
-  // A plain question such as "Welche Termine habe ich?" means upcoming items.
-  // Answer it from the structured agenda immediately instead of paying for an
-  // embedding plus a general model request.
-  if (!todayIntent && !tomorrowIntent && !upcomingIntent && !pastIntent)
-    upcomingIntent = true;
+  String lowerArduino = question;
+  lowerArduino.toLowerCase();
+  const std::string lower = lowerArduino.c_str();
+  auto has = [&](const char* needle) { return lower.find(needle) != std::string::npos; };
+
+  const bool taskWords = has("aufgab") || has("todo") || has("to-do") || has("task") || has("erledig");
+  const bool eventWords = has("termin") || has("meeting") || has("event") || has("appointment") ||
+                          has("schedule") || has("calendar") || has("agenda") || has("busy") ||
+                          has("am i free") || has("bin ich frei");
+  // "When is my dentist?" / "When do I talk to San?" name a subject rather
+  // than a calendar word. Answer those only when the subject is found below.
+  const bool whenQuestion = has("when is") || has("when's") || has("when do") || has("when am") ||
+                            has("what time is") || has("what time do") || has("wann ");
+  if (!taskWords && !eventWords && !whenQuestion) return false;
+  // "What was decided in today's meeting?" is about recorded minutes.
+  if (agenda::asksAboutMinutes(lower)) return false;
+  const bool taskIntent = taskWords || (!eventWords && whenQuestion);
+  const bool eventIntent = eventWords || (!taskWords && whenQuestion);
 
   const String nowUtc = currentUtcIso();
   const String localNow = utcToLocalDeviceLabel(nowUtc);
   if (localNow.length() < 10 || localNow == "time not set") return false;
   const String today = localNow.substring(0, 10);
   const String tomorrow = shiftedLocalDate(nowUtc, 1);
+  const agenda::Range range = agenda::parseRange(lower, today.c_str());
+  const bool past = range.kind == agenda::RangeKind::Past;
+  const bool upcoming = range.kind == agenda::RangeKind::Upcoming;
+  const std::vector<std::string> subject = agenda::subjectWords(lower);
+
   std::vector<BrainTaskRecord> tasks;
   std::vector<BrainTaskRecord> events;
   sourceNotes.clear();
   for (const BrainTaskRecord& item : loadBrainTasks()) {
+    if (item.done) continue;
     if (!item.dueUtc.length()) {
-      if (taskIntent && undatedTaskVisible(item.type == "event", item.done, tomorrowIntent, pastIntent))
-        tasks.push_back(item);
+      // Undated tasks belong to "open/today" overviews only.
+      if (taskIntent && item.type != "event" && (upcoming || range.includeOverdue)) tasks.push_back(item);
       continue;
     }
     const String localDue = utcToLocalDeviceLabel(item.dueUtc);
     if (localDue.length() < 10 || localDue == "time not set") continue;
-    const String dueDay = localDue.substring(0, 10);
+    const std::string dueDay = localDue.substring(0, 10).c_str();
     if (item.type == "event") {
-      // Appointments stop being relevant as soon as their timestamp has
-      // passed. Keep them stored for the calendar/history, but never present
-      // them as remaining or upcoming appointments.
+      if (!eventIntent) continue;
+      // Appointments stop being relevant once their time has passed; they
+      // stay stored for history but are never presented as upcoming.
       const bool relevant = eventStillRelevant(dueDay.c_str(), today.c_str(),
         item.dueUtc.c_str(), nowUtc.c_str(), item.datePrecision == "day");
-      const bool matches = todayIntent ? (dueDay == today && relevant)
-                         : tomorrowIntent ? dueDay == tomorrow
-                         : upcomingIntent ? relevant
-                         : !relevant;
-      if (!item.done && eventIntent && matches) events.push_back(item);
-    } else if (!item.done && taskIntent) {
+      bool matches;
+      if (past) matches = range.from.empty() ? !relevant
+                                             : (dueDay >= range.from && dueDay <= range.to && !relevant);
+      else if (upcoming) matches = relevant;
+      else matches = dueDay >= range.from && dueDay <= range.to && relevant;
+      if (matches) events.push_back(item);
+    } else if (taskIntent) {
       // Unlike appointments, unfinished tasks remain relevant when overdue.
-      const bool matches = todayIntent ? dueDay <= today
-                         : tomorrowIntent ? dueDay == tomorrow
-                         : upcomingIntent ? true
-                         : item.dueUtc <= nowUtc;
+      bool matches;
+      if (past) matches = item.dueUtc <= nowUtc;
+      else if (upcoming) matches = true;
+      else matches = (dueDay >= range.from && dueDay <= range.to) ||
+                     (range.includeOverdue && dueDay < range.from);
       if (matches) tasks.push_back(item);
     }
   }
-  std::sort(events.begin(), events.end(), [pastIntent](const BrainTaskRecord& a, const BrainTaskRecord& b) {
-    return pastIntent ? a.dueUtc > b.dueUtc : a.dueUtc < b.dueUtc;
-  });
-  std::sort(tasks.begin(), tasks.end(), [pastIntent](const BrainTaskRecord& a, const BrainTaskRecord& b) {
-    return pastIntent ? a.dueUtc > b.dueUtc : a.dueUtc < b.dueUtc;
-  });
+
+  // Narrow to the named subject ("San", "dentist") when it matches anything.
+  if (!subject.empty()) {
+    std::vector<BrainTaskRecord> e2, t2;
+    for (const BrainTaskRecord& item : events) if (agenda::mentionsSubject(item.text.c_str(), subject)) e2.push_back(item);
+    for (const BrainTaskRecord& item : tasks) if (agenda::mentionsSubject(item.text.c_str(), subject)) t2.push_back(item);
+    if (!e2.empty() || !t2.empty()) { events.swap(e2); tasks.swap(t2); }
+    else if (!taskWords && !eventWords) return false;  // a "when..." question about something else
+  } else if (!taskWords && !eventWords) {
+    return false;
+  }
+
+  auto byDue = [past](const BrainTaskRecord& a, const BrainTaskRecord& b) {
+    return past ? a.dueUtc > b.dueUtc : a.dueUtc < b.dueUtc;
+  };
+  std::sort(events.begin(), events.end(), byDue);
+  std::sort(tasks.begin(), tasks.end(), byDue);
+  const size_t limit = range.nextOnly ? 1 : 5;
   const size_t totalEvents = events.size(), totalTasks = tasks.size();
-  if (events.size() > 5) events.resize(5);
-  if (tasks.size() > 5) tasks.resize(5);
+  if (events.size() > limit) events.resize(limit);
+  if (tasks.size() > limit) tasks.resize(limit);
 
   const bool german = oracleUiLanguage() == "de";
-  const String skipDay = todayIntent ? today : tomorrowIntent ? tomorrow : String("");
-  const String periodDe = tomorrowIntent ? "Morgen" : upcomingIntent ? "Kommend" :
-                          pastIntent ? "Vergangen" : "Heute";
-  const String periodEn = tomorrowIntent ? "Tomorrow" : upcomingIntent ? "Upcoming" :
-                          pastIntent ? "Past" : "Today";
+  const String skipDay = range.singleDay() ? String(range.from.c_str()) : String("");
+  const String phrase = german ? String(range.phraseDe.c_str()) : String(range.phraseEn.c_str());
+  auto itemList = [&](const std::vector<BrainTaskRecord>& items, const char* dueWord) {
+    String out;
+    for (size_t i = 0; i < items.size(); i++) {
+      if (i) out += "; ";
+      const String when = items[i].dueUtc.length()
+        ? agendaWhen(items[i], skipDay, today, tomorrow, german) : String("");
+      out += items[i].text;
+      if (when.length()) out += String(", ") + dueWord + when;
+    }
+    return out;
+  };
+
+  answer = "";
   if (german) {
-    if (taskIntent && tasks.empty() && !eventIntent) answer = periodDe + " sind keine passenden Aufgaben faellig.";
-    else if (eventIntent && events.empty() && !taskIntent) answer = periodDe + " finde ich keine passenden Termine.";
-    else if (tasks.empty() && events.empty()) answer = periodDe + " finde ich keine passenden Aufgaben oder Termine.";
-    else {
-      if (eventIntent && !events.empty()) answer += periodDe + " gibt es " + String(totalEvents) + " Termine. " +
-        (totalEvents > events.size() ? "Die nächsten fünf: " : "Das sind: ");
-      for (size_t i = 0; i < events.size(); i++) {
-        if (i) answer += "; ";
-        const String when = agendaWhen(events[i], skipDay, today, tomorrow, true);
-        answer += events[i].text + (when.length() ? ", " + when : "");
+    if (range.nextOnly && !events.empty()) {
+      answer = "Dein nächster Termin: " + itemList(events, "") + ".";
+    } else if (events.empty() && tasks.empty()) {
+      if (taskIntent && !eventIntent && upcoming) answer = "Du hast keine offenen Aufgaben.";
+      else answer = String(eventIntent && !taskIntent ? "Keine Termine " : taskIntent && !eventIntent
+                    ? "Keine Aufgaben " : "Keine Termine oder Aufgaben ") + phrase + ".";
+    } else {
+      if (eventIntent) {
+        if (events.empty()) answer = "Keine Termine " + phrase + ".";
+        else answer = "Du hast " + String(totalEvents) + (totalEvents == 1 ? " Termin " : " Termine ") + phrase +
+          (totalEvents > events.size() ? ". Die nächsten fünf: " : ": ") + itemList(events, "") + ".";
       }
       if (taskIntent && !tasks.empty()) {
-        if (answer.length()) answer += ". ";
-        answer += periodDe + " sind " + String(totalTasks) + " Aufgaben relevant. " +
-          (totalTasks > tasks.size() ? "Die ersten fünf: " : "Das sind: ");
-        for (size_t i = 0; i < tasks.size(); i++) {
-          if (i) answer += "; ";
-          const String when = tasks[i].dueUtc.length() ? agendaWhen(tasks[i], skipDay, today, tomorrow, true) : "";
-          answer += tasks[i].text + (when.length() ? ", fällig " + when : "");
-        }
+        if (answer.length()) answer += " ";
+        answer += String(totalTasks) + (totalTasks == 1 ? " Aufgabe" : " Aufgaben") +
+          (upcoming ? " offen" : String(" ") + phrase) +
+          (totalTasks > tasks.size() ? ". Die ersten fünf: " : ": ") + itemList(tasks, "fällig ") + ".";
       }
-      answer += ".";
     }
   } else {
-    if (tasks.empty() && events.empty()) answer = periodEn + ", I found no matching tasks or events.";
-    else {
-      if (!events.empty()) answer = String(totalEvents) + " " + periodEn + " events. " +
-        (totalEvents > events.size() ? "The next five: " : "These are: ");
-      for (size_t i = 0; i < events.size(); i++) {
-        if (i) answer += "; ";
-        const String when = agendaWhen(events[i], skipDay, today, tomorrow, false);
-        answer += events[i].text + (when.length() ? ", " + when : "");
+    if (range.nextOnly && !events.empty()) {
+      answer = "Your next appointment is " + itemList(events, "") + ".";
+    } else if (events.empty() && tasks.empty()) {
+      if (taskIntent && !eventIntent && upcoming) answer = "You have no open tasks.";
+      else answer = String(eventIntent && !taskIntent ? "You have no appointments " : taskIntent && !eventIntent
+                    ? "You have no tasks due " : "You have no appointments or tasks ") + phrase + ".";
+    } else {
+      if (eventIntent) {
+        if (events.empty()) answer = "No appointments " + phrase + ".";
+        else answer = "You have " + String(totalEvents) + (totalEvents == 1 ? " appointment " : " appointments ") +
+          phrase + (totalEvents > events.size() ? ". The next five: " : ": ") + itemList(events, "") + ".";
       }
-      if (!tasks.empty()) {
-        if (answer.length()) answer += ". ";
-        answer += String(totalTasks) + " relevant tasks. " +
-          (totalTasks > tasks.size() ? "The first five: " : "These are: ");
-        for (size_t i = 0; i < tasks.size(); i++) {
-          if (i) answer += "; ";
-          const String when = tasks[i].dueUtc.length() ? agendaWhen(tasks[i], skipDay, today, tomorrow, false) : "";
-          answer += tasks[i].text + (when.length() ? ", due " + when : "");
-        }
+      if (taskIntent && !tasks.empty()) {
+        if (answer.length()) answer += " ";
+        answer += String(totalTasks) + (totalTasks == 1 ? " task" : " tasks") +
+          (upcoming ? " open" : range.includeOverdue ? " due today or overdue" : String(" due ") + phrase) +
+          (totalTasks > tasks.size() ? ". The first five: " : ": ") + itemList(tasks, "due ") + ".";
       }
-      answer += ".";
     }
   }
-  for (const BrainTaskRecord& item : events) {
-    Serial.printf("[Agenda] event due=%s precision=%s text=%s\n", item.dueUtc.c_str(),
-                  item.datePrecision.c_str(), item.text.c_str());
-    sourceNotes.push_back(item.noteNum);
-  }
+  for (const BrainTaskRecord& item : events) sourceNotes.push_back(item.noteNum);
   for (const BrainTaskRecord& item : tasks) sourceNotes.push_back(item.noteNum);
-  Serial.printf("[Agenda] answer: %s\n", answer.c_str());
   return true;
 }
 
