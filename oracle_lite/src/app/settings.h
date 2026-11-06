@@ -35,7 +35,9 @@ bool oracleSaveSettings(const String& ssid, const String& password, const String
 bool oracleClearOpenAiKey();
 
 // Oracle Minutes server (meeting minutes uploads).
-constexpr const char* ORACLE_MINUTES_DEFAULT_URL = "https://whisper.jeremiah.sg";
+// No server is built in: set it in the Web Companion (Setup → Oracle Minutes)
+// or as ORACLE_MINUTES_URL in secrets.h.
+constexpr const char* ORACLE_MINUTES_DEFAULT_URL = "";
 String oracleMinutesUrl();
 String oracleMinutesKey();
 bool oracleHasMinutesKey();
