@@ -2,6 +2,7 @@
 #include <Preferences.h>
 #include "notes.h"
 #include "settings_pair.h"
+#include "secure_store.h"
 
 static Preferences prefs;
 static bool ready = false;
@@ -19,27 +20,69 @@ static String wifiKey(int index, const char* suffix) {
   return "wifi" + String(index) + suffix;
 }
 
+// Wi-Fi passwords and API keys are stored encrypted with the chip key.
+static bool secretKey(const String& key) {
+  return key == "openai_key" || key == "om_key" || key == "wifi_pass" ||
+         (key.startsWith("wifi") && key.endsWith("p") && key.length() <= 7);
+}
+
 static String storedString(const String& key) {
   if (!ready || !prefs.isKey(key.c_str())) return "";
-  return prefs.getString(key.c_str(), "");
+  const String raw = prefs.getString(key.c_str(), "");
+  if (!secureIsEncrypted(raw)) return raw;
+  String plain;
+  if (!secureDecrypt(key, raw, plain)) {
+    Serial.printf("[Secure] could not decrypt %s\n", key.c_str());
+    return "";
+  }
+  return plain;
+}
+
+// Same contract as Preferences::putString: returns text.length() on success.
+static size_t putValue(const String& key, const String& text) {
+  if (secretKey(key) && text.length() && secureStoreReady()) {
+    const String sealed = secureEncrypt(key, text);
+    if (!sealed.length()) return 0;
+    return prefs.putString(key.c_str(), sealed) == sealed.length() ? text.length() : 0;
+  }
+  return prefs.putString(key.c_str(), text);
+}
+
+// Re-save secrets that are still stored in plain text (older builds).
+static void sealPlainSecrets() {
+  if (!secureStoreReady()) return;
+  int sealed = 0;
+  const char* fixed[] = {"openai_key", "om_key", "wifi_pass"};
+  auto seal = [&](const String& key) {
+    if (!prefs.isKey(key.c_str())) return;
+    const String raw = prefs.getString(key.c_str(), "");
+    if (!raw.length() || secureIsEncrypted(raw)) return;
+    if (putValue(key, raw) == raw.length() && storedString(key) == raw) sealed++;
+    else prefs.putString(key.c_str(), raw);   // keep the original on any doubt
+  };
+  for (const char* key : fixed) seal(key);
+  for (int i = 0; i < ORACLE_MAX_WIFI_PROFILES; i++) seal(wifiKey(i, "p"));
+  if (sealed) Serial.printf("[Secure] encrypted %d saved secrets\n", sealed);
 }
 
 static bool storeWifiPair(int index, const String& ssid, const String& password) {
   return saveSettingsPair(ssid, password,
     [&](bool secret) { return storedString(wifiKey(index, secret ? "p" : "s")); },
-    [&](bool secret, const String& text) { prefs.putString(wifiKey(index, secret ? "p" : "s").c_str(), text); });
+    [&](bool secret, const String& text) { putValue(wifiKey(index, secret ? "p" : "s").c_str(), text); });
 }
 
 static bool storeLegacyWifi(const OracleWifiProfile& profile) {
   return saveSettingsPair(profile.ssid, profile.password,
     [&](bool secret) { return storedString(secret ? "wifi_pass" : "wifi_ssid"); },
-    [&](bool secret, const String& text) { prefs.putString(secret ? "wifi_pass" : "wifi_ssid", text); });
+    [&](bool secret, const String& text) { putValue(secret ? "wifi_pass" : "wifi_ssid", text); });
 }
 
 void oracleSettingsBegin() {
   if (ready) return;
+  secureStoreBegin();   // before Wi-Fi starts (uses the hardware RNG once)
   ready = prefs.begin("oracle", false);
   if (!ready) return;
+  sealPlainSecrets();
   // Migrate the original single-network setting without losing it.
   if (!storedString("wifi0s").length()) {
     const String legacySsid = storedString("wifi_ssid");
@@ -133,7 +176,7 @@ bool oracleUpdateWifiProfile(const String& oldSsid, const String& newSsid, const
   cachedWifiCount = -1;
   if (ok && found == 0 && !storeLegacyWifi({newSsid, keptPassword}))
     Serial.println("[Settings] legacy Wi-Fi mirror write failed");
-  if (ok && storedString("last_wifi") == oldSsid) prefs.putString("last_wifi", newSsid);
+  if (ok && storedString("last_wifi") == oldSsid) putValue("last_wifi", newSsid);
   return ok;
 }
 
@@ -157,7 +200,7 @@ bool oracleSetLastWifiSsid(const String& ssid) {
   oracleSettingsBegin();
   if (!ready || !ssid.length() || ssid.length() > 32) return false;
   if (storedString("last_wifi") == ssid) return true;   // skip a flash write per connect
-  return prefs.putString("last_wifi", ssid) > 0;
+  return putValue("last_wifi", ssid) > 0;
 }
 String oracleOpenAiKey() { return value("openai_key"); }
 String oracleSpeechVoice() {
@@ -172,7 +215,7 @@ String oracleUiLanguage() {
 bool oracleSetUiLanguage(const String& language) {
   oracleSettingsBegin();
   if (!ready || !supportedLanguage(language)) return false;
-  return prefs.putString("ui_lang", language) > 0;
+  return putValue("ui_lang", language) > 0;
 }
 int oraclePlaybackVolume() {
   oracleSettingsBegin();
@@ -203,21 +246,21 @@ bool oracleSaveSettings(const String& ssid, const String& password, const String
   bool ok = ssid.length() ? oracleSaveWifiProfile(ssid, password) : true;
   if (!ok) return false;
   if (apiKey.length() > 0) {
-    const bool stored = prefs.putString("openai_key", apiKey) == apiKey.length();
+    const bool stored = putValue("openai_key", apiKey) == apiKey.length();
     ok = stored && ok;
     if (stored) {
       cachedApiConfigured = apiKey.length() > 10 ? 1 : 0;
       resumeBlockedCloudNotes();
     }
   }
-  ok = (prefs.putString("tts_voice", speechVoice) == speechVoice.length()) && ok;
+  ok = (putValue("tts_voice", speechVoice) == speechVoice.length()) && ok;
   return ok;
 }
 
 bool oracleSetSpeechVoice(const String& voice) {
   oracleSettingsBegin();
   if (!ready || (voice != "cedar" && voice != "coral" && voice != "eleven")) return false;
-  return prefs.putString("tts_voice", voice) == voice.length();
+  return putValue("tts_voice", voice) == voice.length();
 }
 
 bool oracleClearOpenAiKey() {
@@ -260,8 +303,8 @@ bool oracleSaveMinutes(const String& url, const String& apiKey) {
   if (!ready || url.length() > 120 || apiKey.length() > 200) return false;
   if (url.length() && !url.startsWith("https://") && !url.startsWith("http://")) return false;
   bool ok = true;
-  if (url.length()) ok = prefs.putString("om_url", url) == url.length();
-  if (apiKey.length()) ok = (prefs.putString("om_key", apiKey) == apiKey.length()) && ok;
+  if (url.length()) ok = putValue("om_url", url) == url.length();
+  if (apiKey.length()) ok = (putValue("om_key", apiKey) == apiKey.length()) && ok;
   return ok;
 }
 
