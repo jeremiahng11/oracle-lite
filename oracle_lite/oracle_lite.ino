@@ -1811,6 +1811,7 @@ void initializeStorage() {
   // rebuilt lazily by the first operation that actually needs them.
   loadIndex(true);
   Serial.printf("[SD] %d memories\n", static_cast<int>(noteIndex.size()));
+  migrateDueTimesToSingapore();
 }
 
 }  // namespace

@@ -58,3 +58,6 @@ std::vector<BrainMemory> retrieveBrainMemories(
   size_t limit = 5,
   const std::vector<float>* queryEmbedding = nullptr
 );
+
+// One-time move of stored due times from German time to Singapore time.
+void migrateDueTimesToSingapore();

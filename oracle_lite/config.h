@@ -81,7 +81,8 @@
 #ifndef ORACLE_PRIVATE_DIAGNOSTICS
 #define ORACLE_PRIVATE_DIAGNOSTICS 0
 #endif
-#define LOCAL_TZ_RULE          "CET-1CEST,M3.5.0,M10.5.0/3"
+// Device time zone (POSIX rule). Singapore Time, UTC+8, no daylight saving.
+#define LOCAL_TZ_RULE          "<+08>-8"
 #ifndef ORACLE_LITE_VERSION
 #define ORACLE_LITE_VERSION "1.0.0-rc002"   // fallback only; PlatformIO uses version.txt
 #endif

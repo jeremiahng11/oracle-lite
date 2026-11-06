@@ -8,6 +8,7 @@
 #include "date_validation.h"
 #include "task_identity.h"
 #include "storage_commit.h"
+#include "agenda_range.h"
 #include "utf8_excerpt.h"
 #include "checked_file_write.h"
 #include "memory_response.h"
@@ -799,4 +800,77 @@ std::vector<BrainMemory> retrieveBrainMemories(
     result.push_back(scored[i].memory);
   }
   return result;
+}
+
+
+// ─── One-time time-zone correction ──────────────────────────────────────────
+// Earlier builds used German time (CET/CEST) as the device's local
+// time, so a spoken "11am" was stored as 11:00 German time. The device now
+// runs on Singapore time; move every stored due time so it keeps the wall-clock
+// time that was said (11:00 CET -> 11:00 SGT). Runs once per SD card.
+static bool cestAt(long long epoch) {
+  // CEST: last Sunday of March 01:00 UTC until last Sunday of October 01:00 UTC.
+  const long day = static_cast<long>(epoch / 86400);
+  int y, m, d;
+  agenda::civilFromDays(day, y, m, d);
+  auto lastSunday = [&](int month) {
+    const long last = agenda::daysFromCivil(month == 12 ? y + 1 : y, month == 12 ? 1 : month + 1, 1) - 1;
+    return last - ((agenda::weekdayMon0(last) + 1) % 7);   // Monday=0 ... Sunday=6
+  };
+  const long long start = static_cast<long long>(lastSunday(3)) * 86400 + 3600;
+  const long long end = static_cast<long long>(lastSunday(10)) * 86400 + 3600;
+  return epoch >= start && epoch < end;
+}
+
+static String isoFromEpoch(long long epoch) {
+  int y, m, d;
+  agenda::civilFromDays(static_cast<long>(epoch / 86400), y, m, d);
+  const long secs = static_cast<long>(epoch % 86400);
+  char buf[24];
+  snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02ld:%02ld:%02ldZ", y, m, d, secs / 3600, (secs / 60) % 60, secs % 60);
+  return String(buf);
+}
+
+void migrateDueTimesToSingapore() {
+  const char* marker = NOTES_DIR "/.tz_sgt";
+  if (SD_MMC.exists(marker)) return;
+  int moved = 0, failed = 0;
+  for (const NoteEntry& note : noteIndex) {
+    const String path = brainMemoryPath(note.num);
+    File in = sdOpenRead(path.c_str());
+    if (!in) continue;
+    JsonDocument doc;
+    const bool parsed = !deserializeJson(doc, in);
+    in.close();
+    if (!parsed) continue;
+    bool changed = false;
+    for (JsonObject task : doc["tasks"].as<JsonArray>()) {
+      const String due = task["dueUtc"] | "";
+      if (!validUtcTimestamp(due.c_str())) continue;
+      const long long epoch = static_cast<long long>(agenda::daysFromCivil(due.substring(0, 4).toInt(),
+          due.substring(5, 7).toInt(), due.substring(8, 10).toInt())) * 86400 +
+          due.substring(11, 13).toInt() * 3600 + due.substring(14, 16).toInt() * 60 +
+          (due.length() >= 19 ? due.substring(17, 19).toInt() : 0);
+      const int germanOffset = cestAt(epoch) ? 7200 : 3600;
+      task["dueUtc"] = isoFromEpoch(epoch + germanOffset - 8 * 3600);
+      changed = true;
+      moved++;
+    }
+    if (!changed) continue;
+    const String temp = path + ".tmp";
+    sdRemoveIfExists(temp.c_str());
+    File out = SD_MMC.open(temp.c_str(), FILE_WRITE);
+    const size_t expected = measureJson(doc);
+    const bool ok = out && serializeJson(doc, out) == expected;
+    if (out) { out.flush(); out.close(); }
+    if (!ok || !replaceAtomically(path, temp)) { sdRemoveIfExists(temp.c_str()); failed++; }
+  }
+  if (failed) {
+    Serial.printf("[Time] moving due times to Singapore time: %d files failed, will retry\n", failed);
+    return;
+  }
+  File done = SD_MMC.open(marker, FILE_WRITE);
+  if (done) { done.print("Agenda times converted from German time to Singapore time\n"); done.close(); }
+  storageChanged();
+  Serial.printf("[Time] %d agenda times moved to Singapore time\n", moved);
 }
