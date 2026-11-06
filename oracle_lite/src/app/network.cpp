@@ -989,14 +989,6 @@ static String agendaWhen(const BrainTaskRecord& item, const String& skipDay, con
   return out;
 }
 
-// Friendly stamp for briefing agendas, e.g. "today 11am", "6th November 3:30pm".
-static String agendaStamp(const BrainTaskRecord& item, bool german) {
-  const String nowUtc = currentUtcIso();
-  const String localNow = utcToLocalDeviceLabel(nowUtc);
-  const String today = localNow.length() >= 10 ? localNow.substring(0, 10) : String("");
-  return agendaWhen(item, "", today, shiftedLocalDate(nowUtc, 1), german);
-}
-
 bool answerAgendaQuestion(const String& question, String& answer, std::vector<int>& sourceNotes) {
   if (oracleUiLanguage() != "de" && oracleUiLanguage() != "en") return false;
   String lowerArduino = question;
@@ -1147,87 +1139,32 @@ bool answerAgendaQuestion(const String& question, String& answer, std::vector<in
   return true;
 }
 
-bool buildDailyBriefing(String& answer, int& taskCount, int& eventCount) {
-  answer = "";
-  taskCount = 0;
-  eventCount = 0;
-  const String nowUtc = currentUtcIso();
-  const String localNow = utcToLocalDeviceLabel(nowUtc);
-  if (localNow.length() < 10 || localNow == "time not set") return false;
-  const String today = localNow.substring(0, 10);
-  String agenda;
-  for (const BrainTaskRecord& task : loadBrainTasks()) {
-    if (task.done) continue;
-    if (!task.dueUtc.length()) {
-      if (undatedTaskVisible(task.type == "event", task.done)) {
-        taskCount++;
-        agenda += "\nOPEN TASK (no due date): " + task.text;
-      }
-      continue;
-    }
-    const String localDue = utcToLocalDeviceLabel(task.dueUtc);
-    if (localDue.length() < 10 || localDue == "time not set") continue;
-    const String dueDay = localDue.substring(0, 10);
-    if (task.type == "event") {
-      // A briefing is forward-looking. Events that already happened today
-      // belong in a recap, not in the remaining agenda.
-      if (dueDay != today || !eventStillRelevant(dueDay.c_str(), today.c_str(),
-          task.dueUtc.c_str(), nowUtc.c_str(), task.datePrecision == "day")) continue;
-      eventCount++;
-      agenda += "\nEVENT " + agendaStamp(task, oracleUiLanguage() == "de") + ": " + task.text;
-    } else {
-      if (dueDay > today) continue;
-      taskCount++;
-      agenda += "\n" + String(dueDay < today ? "OVERDUE " : "TASK ") +
-        agendaStamp(task, oracleUiLanguage() == "de") + ": " + task.text;
-    }
-  }
-  const bool germanOutput = oracleUiLanguage() == "de";
-  if (!agenda.length()) {
-    answer = answerMessage(oracleUiLanguage().c_str(), NoAgenda);
-    return true;
-  }
-
-  JsonDocument request;
-  request["model"] = "gpt-4o-mini";
-  request["store"] = false;
-  request["max_output_tokens"] = 1024;
-  request["instructions"] = String(
-    "You are Oracle, a calm private second brain. Give a useful spoken daily briefing in the "
-    "configured device language. Mention appointments chronologically, then overdue and today's tasks. "
-    "Start directly with the remaining agenda. Never use a greeting such as Guten Morgen, Guten Tag, "
-    "Guten Abend, Hallo, Good morning, Good afternoon, Good evening, or Hello. "
-    "Be warm but concise: at most five short sentences. Use only the supplied agenda. "
-    "Always address the user informally: use du/dein in German, never Sie/Ihr. ") +
-    configuredLanguageInstruction("the complete briefing") +
-    " Translate agenda items when helpful." +
-    " Say dates and times exactly as written in the agenda (for example 6th November 11am); never use numeric dates like 2026-11-06 or 24-hour times.";
-  request["input"] = "Local date: " + today + "\nAgenda:" + agenda;
-  String payload, response;
-  serializeJson(request, payload);
-  if (!openAiJsonPost("/v1/responses", payload, response)) return false;
-  answer = responseOutputText(response);
-  answer.trim();
-  // Keep the interaction time-neutral even if a model occasionally ignores
-  // the explicit no-greeting instruction.
-  String lower = answer;
-  lower.toLowerCase();
-  const char* greetings[] = {"guten morgen", "guten tag", "guten abend", "hallo",
-                             "good morning", "good afternoon", "good evening", "hello"};
-  for (const char* greeting : greetings) {
-    const int length = strlen(greeting);
-    if (!lower.startsWith(greeting)) continue;
-    int cut = length;
-    while (cut < static_cast<int>(answer.length()) &&
-           (answer[cut] == '!' || answer[cut] == ',' || answer[cut] == '.' || answer[cut] == ' ')) cut++;
-    answer = answer.substring(cut);
-    answer.trim();
-    break;
-  }
-  return answer.length() > 0;
+// Briefings are built on the device from the stored agenda: instant, no AI
+// round trip, and they still work (as text) without the internet.
+static String briefingDayLabel(const std::string& day, const String& today, const String& tomorrow, bool german) {
+  if (String(day.c_str()) == today) return german ? "Heute" : "Today";
+  if (String(day.c_str()) == tomorrow) return german ? "Morgen" : "Tomorrow";
+  const long n = agenda::dayNumber(day);
+  return String(german ? agenda::dateDe(n).c_str() : agenda::dateEn(n).c_str());
 }
 
-bool buildWeeklyBriefing(String& answer, int& taskCount, int& eventCount) {
+static String briefingList(const std::vector<BrainTaskRecord>& items, size_t limit, bool withDay,
+                           const String& today, const String& tomorrow, bool german) {
+  String out;
+  for (size_t i = 0; i < items.size() && i < limit; i++) {
+    if (i) out += "; ";
+    out += items[i].text;
+    if (items[i].dueUtc.length()) {
+      const String local = utcToLocalDeviceLabel(items[i].dueUtc);
+      const String when = agendaWhen(items[i], withDay ? String("") : local.substring(0, 10), today, tomorrow, german);
+      if (when.length()) out += ", " + when;
+    }
+  }
+  if (items.size() > limit) out += german ? ", und weitere" : ", and more";
+  return out;
+}
+
+static bool buildLocalBriefing(int days, String& answer, int& taskCount, int& eventCount) {
   answer = "";
   taskCount = 0;
   eventCount = 0;
@@ -1235,54 +1172,99 @@ bool buildWeeklyBriefing(String& answer, int& taskCount, int& eventCount) {
   const String localNow = utcToLocalDeviceLabel(nowUtc);
   if (localNow.length() < 10 || localNow == "time not set") return false;
   const String today = localNow.substring(0, 10);
-  const String lastDay = shiftedLocalDate(nowUtc, 6);
-  String agenda;
+  const String tomorrow = shiftedLocalDate(nowUtc, 1);
+  const std::string lastDay = agenda::dayString(agenda::dayNumber(today.c_str()) + days - 1);
+  const bool german = oracleUiLanguage() == "de";
+
+  std::vector<BrainTaskRecord> events, due, overdue, open;
   for (const BrainTaskRecord& task : loadBrainTasks()) {
     if (task.done) continue;
     if (!task.dueUtc.length()) {
-      if (undatedTaskVisible(task.type == "event", task.done)) {
-        taskCount++;
-        agenda += "\nOPEN TASK (no due date): " + task.text;
-      }
+      if (task.type != "event") open.push_back(task);
       continue;
     }
     const String localDue = utcToLocalDeviceLabel(task.dueUtc);
     if (localDue.length() < 10 || localDue == "time not set") continue;
-    const String dueDay = localDue.substring(0, 10);
+    const std::string dueDay = localDue.substring(0, 10).c_str();
     if (task.type == "event") {
       if (dueDay > lastDay || !eventStillRelevant(dueDay.c_str(), today.c_str(),
           task.dueUtc.c_str(), nowUtc.c_str(), task.datePrecision == "day")) continue;
-      eventCount++;
-      agenda += "\nEVENT " + agendaStamp(task, oracleUiLanguage() == "de") + ": " + task.text;
-    } else {
-      if (dueDay > lastDay) continue;
-      taskCount++;
-      agenda += "\n" + String(dueDay < today ? "OVERDUE " : "TASK ") +
-        agendaStamp(task, oracleUiLanguage() == "de") + ": " + task.text;
+      events.push_back(task);
+    } else if (dueDay < today.c_str()) {
+      overdue.push_back(task);
+    } else if (dueDay <= lastDay) {
+      due.push_back(task);
     }
   }
-  const bool germanOutput = oracleUiLanguage() == "de";
-  if (!agenda.length()) {
-    answer = answerMessage(oracleUiLanguage().c_str(), NoAgenda);
-    return true;
+  auto byDue = [](const BrainTaskRecord& a, const BrainTaskRecord& b) { return a.dueUtc < b.dueUtc; };
+  std::sort(events.begin(), events.end(), byDue);
+  std::sort(due.begin(), due.end(), byDue);
+  std::sort(overdue.begin(), overdue.end(), byDue);
+  eventCount = events.size();
+  taskCount = due.size() + overdue.size() + open.size();
+  const bool weekly = days > 1;
+
+  // Appointments.
+  if (events.empty()) {
+    answer = german ? (weekly ? "Keine Termine in den nächsten sieben Tagen." : "Heute stehen keine Termine mehr an.")
+                    : (weekly ? "No appointments in the next seven days." : "No more appointments today.");
+  } else if (!weekly) {
+    answer = german ? "Heute hast du " + String(events.size()) + (events.size() == 1 ? " Termin: " : " Termine: ")
+                    : "Today you have " + String(events.size()) + (events.size() == 1 ? " appointment: " : " appointments: ");
+    answer += briefingList(events, 6, false, today, tomorrow, german) + ".";
+  } else {
+    answer = german ? String(events.size()) + (events.size() == 1 ? " Termin" : " Termine") + " in den nächsten sieben Tagen."
+                    : String(events.size()) + (events.size() == 1 ? " appointment" : " appointments") + " in the next seven days.";
+    // Group by day: "Monday 9th November: Dentist, 3pm; Call San, 5pm."
+    size_t i = 0, spoken = 0;
+    while (i < events.size() && spoken < 10) {
+      const std::string day = utcToLocalDeviceLabel(events[i].dueUtc).substring(0, 10).c_str();
+      std::vector<BrainTaskRecord> sameDay;
+      while (i < events.size() && std::string(utcToLocalDeviceLabel(events[i].dueUtc).substring(0, 10).c_str()) == day)
+        sameDay.push_back(events[i++]);
+      answer += " " + briefingDayLabel(day, today, tomorrow, german) + ": " +
+                briefingList(sameDay, 10 - spoken, false, today, tomorrow, german) + ".";
+      spoken += sameDay.size();
+    }
+    if (events.size() > spoken) answer += german ? " Und weitere." : " And more.";
   }
-  JsonDocument request;
-  request["model"] = "gpt-4o-mini";
-  request["store"] = false;
-  request["max_output_tokens"] = 1024;
-  request["instructions"] = String(
-    "You are Oracle, a calm private second brain. Give a concise spoken seven-day briefing. "
-    "Start directly with the schedule, group items chronologically, mention overdue tasks, and use only supplied data. "
-    "Never greet the user. Always use informal address. At most seven short sentences. ") +
-    configuredLanguageInstruction("the complete briefing") +
-    " Say dates and times exactly as written in the agenda (for example 6th November 11am); never use numeric dates like 2026-11-06 or 24-hour times.";
-  request["input"] = "Period: " + today + " through " + lastDay + "\nAgenda:" + agenda;
-  String payload, response;
-  serializeJson(request, payload);
-  if (!openAiJsonPost("/v1/responses", payload, response)) return false;
-  answer = responseOutputText(response);
+
+  // Tasks.
+  if (!due.empty()) {
+    answer += german ? " " + String(due.size()) + (due.size() == 1 ? " Aufgabe" : " Aufgaben") +
+                         (weekly ? " fällig diese Woche: " : " heute fällig: ")
+                     : " " + String(due.size()) + (due.size() == 1 ? " task" : " tasks") +
+                         (weekly ? " due this week: " : " due today: ");
+    answer += briefingList(due, 5, weekly, today, tomorrow, german) + ".";
+  }
+  if (!overdue.empty()) {
+    answer += german ? " " + String(overdue.size()) + " überfällig: " : " " + String(overdue.size()) + " overdue: ";
+    answer += briefingList(overdue, 3, true, today, tomorrow, german) + ".";
+  }
+  if (!open.empty()) {
+    if (!weekly && due.empty() && overdue.empty() && open.size() <= 3) {
+      answer += german ? " Offene Aufgaben: " : " Open tasks: ";
+      answer += briefingList(open, 3, false, today, tomorrow, german) + ".";
+    } else {
+      answer += german ? " Dazu " + String(open.size()) + " offene Aufgaben ohne Datum."
+                       : " Plus " + String(open.size()) + " open " + (open.size() == 1 ? "task" : "tasks") + " without a date.";
+    }
+  }
+  if (events.empty() && taskCount == 0)
+    answer = german ? (weekly ? "Die nächsten sieben Tage sind frei. Keine Termine und keine fälligen Aufgaben."
+                              : "Heute ist nichts geplant. Keine Termine und keine fälligen Aufgaben.")
+                    : (weekly ? "Your next seven days are clear. No appointments or tasks due."
+                              : "Nothing planned for today. No appointments or tasks due.");
   answer.trim();
-  return answer.length() > 0;
+  return true;
+}
+
+bool buildDailyBriefing(String& answer, int& taskCount, int& eventCount) {
+  return buildLocalBriefing(1, answer, taskCount, eventCount);
+}
+
+bool buildWeeklyBriefing(String& answer, int& taskCount, int& eventCount) {
+  return buildLocalBriefing(7, answer, taskCount, eventCount);
 }
 
 static bool asciiDigit(char c) { return c >= '0' && c <= '9'; }

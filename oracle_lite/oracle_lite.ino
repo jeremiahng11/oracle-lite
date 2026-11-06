@@ -1242,88 +1242,42 @@ bool askOneWebQuestion() {
   return browseAnswerPages(answer, 0, true);
 }
 
-void playDailyBriefing() {
+// Briefings are composed on the device (instant). Wi-Fi is only needed for
+// the voice; without it the briefing is shown as text.
+void playBriefing(bool weekly) {
   lastUpperTapAt = 0;
   lastLowerTapAt = 0;
-  if (!oracleHasWifi() || !oracleHasOpenAiKey()) {
-    enterCompanion();
-    return;
-  }
   state = STATE_ASKING;
-  constexpr const char* kBriefingPath = NOTES_DIR "/.oracle-briefing.wav";
-  if (WiFi.status() != WL_CONNECTED) showAskProgress("CONNECTING", "TODAY");
-  if (!connectConfiguredWifi()) {
-    stopWifi();
-    showError("NO WIFI");
-    delay(1400);
-    returnToReady();
-    return;
-  }
   loadIndex();
-  showAskProgress("THINKING", "DAILY BRIEF");
   String answer;
   int tasks = 0, events = 0;
-  if (!buildDailyBriefing(answer, tasks, events)) {
-    stopWifi();
-    showError("BRIEF FAILED");
+  const bool built = weekly ? buildWeeklyBriefing(answer, tasks, events)
+                            : buildDailyBriefing(answer, tasks, events);
+  if (!built) {
+    showError("SET THE TIME");
     delay(1400);
     returnToReady();
     return;
   }
-  Serial.printf("[Briefing] %d tasks, %d events; answer=%u characters\n", tasks, events, answer.length());
-  showAskProgress("BUILDING", "VOICE");
-  const bool speechReady = playBrainSpeech(answer, kBriefingPath, tasks + events, true);
-  if (!speechReady) {
-    stopWifi();
-    showError("VOICE FAILED");
-    delay(1000);
-    showAskSpeaking(answer, tasks + events);
+  Serial.printf("[Briefing] %s: %d tasks, %d events, %u characters\n", weekly ? "weekly" : "daily",
+                tasks, events, answer.length());
+  bool spoken = false;
+  if (oracleHasWifi()) {
+    if (WiFi.status() != WL_CONNECTED) showAskProgress("CONNECTING", weekly ? "THIS WEEK" : "TODAY");
+    if (WiFi.status() == WL_CONNECTED || connectConfiguredWifi()) {
+      showAskProgress("BUILDING", "VOICE");
+      spoken = playBrainSpeech(answer, weekly ? NOTES_DIR "/.oracle-weekly.wav" : NOTES_DIR "/.oracle-briefing.wav",
+                               tasks + events, true);
+    }
   }
-  stopWifi();
+  if (!spoken) showAskSpeaking(answer, tasks + events);
   browseAnswerPages(answer, tasks + events);
   returnToReady();
 }
 
-void playWeeklyBriefing() {
-  lastUpperTapAt = 0;
-  lastLowerTapAt = 0;
-  if (!oracleHasWifi() || !oracleHasOpenAiKey()) {
-    enterCompanion();
-    return;
-  }
-  state = STATE_ASKING;
-  constexpr const char* kBriefingPath = NOTES_DIR "/.oracle-weekly.wav";
-  if (WiFi.status() != WL_CONNECTED) showAskProgress("CONNECTING", "THIS WEEK");
-  if (!connectConfiguredWifi()) {
-    stopWifi();
-    showError("NO WIFI");
-    delay(1400);
-    returnToReady();
-    return;
-  }
-  loadIndex();
-  showAskProgress("THINKING", "WEEKLY BRIEF");
-  String answer;
-  int tasks = 0, events = 0;
-  if (!buildWeeklyBriefing(answer, tasks, events)) {
-    stopWifi();
-    showError("BRIEF FAILED");
-    delay(1400);
-    returnToReady();
-    return;
-  }
-  showAskProgress("BUILDING", "VOICE");
-  const bool speechReady = playBrainSpeech(answer, kBriefingPath, tasks + events, true);
-  if (!speechReady) {
-    stopWifi();
-    showError("VOICE FAILED");
-    delay(1000);
-    showAskSpeaking(answer, tasks + events);
-  }
-  stopWifi();
-  browseAnswerPages(answer, tasks + events);
-  returnToReady();
-}
+void playDailyBriefing() { playBriefing(false); }
+
+void playWeeklyBriefing() { playBriefing(true); }
 
 PressResult classifyPress(int pin) {
   if (digitalRead(pin) != LOW) return PressResult::Released;
