@@ -7,6 +7,7 @@
 #include "mbedtls/base64.h"
 #include <string.h>
 #include <vector>
+#include <Preferences.h>
 
 static const char kPrefix[] = "enc1:";
 static const char kLabel[] = "oracle-lite/settings/v1";
@@ -22,11 +23,24 @@ bool secureStoreBegin() {
   if (ready) return true;
   esp_efuse_block_t block = EFUSE_BLK_KEY_MAX;
   if (!esp_efuse_find_purpose(ESP_EFUSE_KEY_PURPOSE_HMAC_UP, &block)) {
+    // Burn at most once. A flag is saved before burning; if a burn was
+    // started but no HMAC key exists (e.g. power cut mid-write), never use up
+    // another eFuse block automatically.
+    Preferences marker;
+    if (!marker.begin("oracle_sec", false)) return false;
+    if (marker.getBool("burn_try", false)) {
+      marker.end();
+      Serial.println("[Secure] an earlier key burn did not finish; settings stay unencrypted");
+      return false;
+    }
     block = esp_efuse_find_unused_key_block();
     if (block == EFUSE_BLK_KEY_MAX) {
+      marker.end();
       Serial.println("[Secure] no free eFuse key block; settings stay unencrypted");
       return false;
     }
+    if (!marker.putBool("burn_try", true)) { marker.end(); return false; }
+    marker.end();
     // One-time: create the chip key from the hardware random generator.
     uint8_t key[32];
     bootloader_random_enable();

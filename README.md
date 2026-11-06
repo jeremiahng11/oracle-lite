@@ -74,7 +74,9 @@ restarts. A failed upload leaves the running firmware untouched.
 Wi-Fi passwords and API keys are encrypted with a key that is created on the
 first start and burned into a spare eFuse key block of the ESP32-S3 (HMAC
 purpose, read-protected). This uses one of the chip's six key blocks
-permanently; USB flashing is unaffected. Optional build-time defaults go in
+permanently; USB flashing is unaffected. Encryption is one-way: firmware older
+than this release cannot read the encrypted values, so after going back to an
+old build re-enter Wi-Fi and keys in Setup. Optional build-time defaults go in
 `oracle_lite/secrets.h` (copy `secrets.example.h`; it is git-ignored).
 
 Recordings and transcripts are stored on the SD card under `/notes`. Back up

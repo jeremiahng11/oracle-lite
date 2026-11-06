@@ -22,8 +22,9 @@ static String wifiKey(int index, const char* suffix) {
 
 // Wi-Fi passwords and API keys are stored encrypted with the chip key.
 static bool secretKey(const String& key) {
-  return key == "openai_key" || key == "om_key" || key == "wifi_pass" ||
-         (key.startsWith("wifi") && key.endsWith("p") && key.length() <= 7);
+  if (key == "openai_key" || key == "om_key" || key == "wifi_pass") return true;
+  // Wi-Fi profile passwords: wifi0p .. wifi9p (never the SSIDs wifiNs).
+  return key.length() == 6 && key.startsWith("wifi") && isDigit(key[4]) && key[5] == 'p';
 }
 
 static String storedString(const String& key) {
@@ -38,8 +39,29 @@ static String storedString(const String& key) {
   return plain;
 }
 
+// True when every stored secret can be read. If one cannot (chip key not
+// available, damaged value), Wi-Fi edits/removals must not run: they would
+// read an empty password and save it over the real one.
+static bool secretsReadable() {
+  auto readable = [](const String& key) {
+    if (!prefs.isKey(key.c_str())) return true;
+    const String raw = prefs.getString(key.c_str(), "");
+    if (!secureIsEncrypted(raw)) return true;
+    String plain;
+    return secureDecrypt(key, raw, plain);
+  };
+  if (!readable("openai_key") || !readable("om_key") || !readable("wifi_pass")) return false;
+  for (int i = 0; i < ORACLE_MAX_WIFI_PROFILES; i++) if (!readable(wifiKey(i, "p"))) return false;
+  return true;
+}
+
 // Same contract as Preferences::putString: returns text.length() on success.
 static size_t putValue(const String& key, const String& text) {
+  if (secretKey(key) && !secureStoreReady() && prefs.isKey(key.c_str()) &&
+      secureIsEncrypted(prefs.getString(key.c_str(), ""))) {
+    Serial.printf("[Secure] chip key unavailable; not overwriting %s\n", key.c_str());
+    return 0;
+  }
   if (secretKey(key) && text.length() && secureStoreReady()) {
     const String sealed = secureEncrypt(key, text);
     if (!sealed.length()) return 0;
@@ -141,7 +163,7 @@ bool oracleRemoveWifiProfile(const String& ssid) {
   for (int i = 0; i < ORACLE_MAX_WIFI_PROFILES; i++) {
     if (storedString(wifiKey(i, "s")) == ssid) { found = i; break; }
   }
-  if (found < 0) return false;
+  if (found < 0 || !secretsReadable()) return false;
   OracleWifiProfile before[ORACLE_MAX_WIFI_PROFILES];
   for (int i = 0; i < ORACLE_MAX_WIFI_PROFILES; ++i) before[i] = oracleWifiProfile(i);
   bool ok = true;
@@ -171,6 +193,7 @@ bool oracleUpdateWifiProfile(const String& oldSsid, const String& newSsid, const
     else if (stored == newSsid && newSsid != oldSsid) return false;   // that name is already saved
   }
   if (found < 0) return false;
+  if (!password.length() && !secretsReadable()) return false;
   const String keptPassword = password.length() ? password : storedString(wifiKey(found, "p"));
   const bool ok = storeWifiPair(found, newSsid, keptPassword);
   cachedWifiCount = -1;
