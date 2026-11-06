@@ -760,16 +760,6 @@ bool oracleServerTts(const String& text, const char* outputPath) {
   return ok;
 }
 
-// What the screen shows for a web question: the question that was heard,
-// then the answer.
-String oracleQaText(const String& question, const String& answer) {
-  String q = question;
-  q.trim();
-  if (!q.length()) return answer;
-  const bool german = oracleUiLanguage() == "de";
-  return String(german ? "FRAGE: " : "QUESTION: ") + q + "\n" + (german ? "ANTWORT: " : "ANSWER: ") + answer;
-}
-
 // ─── Spoken web question through /api/voice ────────────────────────────────
 // One trip: the WAV goes up, the reply streams back as lines:
 //   T {"text"} what was heard   P {"text"} answer sentence   B <base64> voice
@@ -1052,9 +1042,13 @@ int readVoiceReply(Client& client, uint32_t startedAt, uint32_t uploadedAt,
                               reinterpret_cast<const uint8_t*>(text.c_str()), text.length()) != 0) return;
     if (!player.feed(decoded.data(), decodedLength)) playbackFailed = true;
     if (!shown && stream.ready()) {
-      shownText = oracleQaText(question, partialAnswer);
-      showAskSpeaking(shownText, 0);
-      lastScreenAt = millis();
+      // The voice starts: show the answer (once its first words are known;
+      // until then the question stays on screen).
+      if (partialAnswer.length()) {
+        shownText = partialAnswer;
+        showAskSpeaking(shownText, 0);
+        lastScreenAt = millis();
+      }
       shown = true;
       audioPlaying = true;
       stream.start();
@@ -1079,15 +1073,19 @@ int readVoiceReply(Client& client, uint32_t startedAt, uint32_t uploadedAt,
     if (kind != 'B' && lineCount < 40)   // see exactly what the server sends
       Serial.printf("[Voice] < %c %s\n", kind, payload.substring(0, 160).c_str());
     lineCount++;
-    if (kind == 'T') { question = anyText(payload, {"text", "question", "q"}); if (!shown) showAskProgress("BUILDING", nullptr); }
+    if (kind == 'T') {
+      question = anyText(payload, {"text", "question", "q"});
+      // Show what was heard first; the answer replaces it when the voice starts.
+      if (!shown) { if (question.length()) showAskQuestion(question); else showAskProgress("BUILDING", nullptr); }
+    }
     else if (kind == 'P') {
       const String part = anyText(payload, {"text", "t", "sentence", "answer"});
       if (part.length()) partialAnswer += (partialAnswer.length() ? " " : "") + part;
       // Show the answer as it arrives while the voice plays (page one only
       // changes until it is full; at most every 2.5 s).
-      if (shown && part.length() && millis() - lastScreenAt >= 2500UL) {
-        const String next = oracleQaText(question, partialAnswer);
-        if (askAnswerPageCount(shownText) == 1 || askAnswerPageCount(next) == 1) {
+      if (shown && part.length() && (!shownText.length() || millis() - lastScreenAt >= 2500UL)) {
+        const String next = partialAnswer;
+        if (!shownText.length() || askAnswerPageCount(shownText) == 1) {
           shownText = next;
           showAskSpeaking(shownText, 0);
           lastScreenAt = millis();
@@ -1140,7 +1138,7 @@ int readVoiceReply(Client& client, uint32_t startedAt, uint32_t uploadedAt,
   answer.trim();
   const bool complete = ended || response.done();
   if (streamReady && complete && !shown && player.hasAudio()) {
-    shownText = oracleQaText(question, answer);
+    shownText = answer;
     showAskSpeaking(shownText, 0);
     shown = true;
     audioPlaying = true;
@@ -1163,7 +1161,7 @@ int readVoiceReply(Client& client, uint32_t startedAt, uint32_t uploadedAt,
     Serial.printf("[Voice] reply had no answer (%d lines) %s\n", lineCount, serverError.c_str());
   }
   // Leave the complete answer on screen for paging.
-  if (answer.length() && shownText != oracleQaText(question, answer)) showAskSpeaking(oracleQaText(question, answer), 0);
+  if (answer.length() && shownText != answer) showAskSpeaking(answer, 0);
   return 200;
 }
 

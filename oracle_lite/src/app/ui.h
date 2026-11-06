@@ -26,6 +26,7 @@ void showAskProgress(const char* action, const char* object = nullptr);
 void showAskSpeaking(const String& answer, int sourceCount);
 int askAnswerPageCount(const String& answer);
 void showAskSpeakingPage(const String& answer, int sourceCount, int page);
+void showAskQuestion(const String& question);
 void showTransferConnecting();
 void showTransferMode(const char* ip, const char* apPassword = nullptr);
 void showVolumeSetting(int percent);

@@ -589,11 +589,18 @@ void returnToReady() {
 
 // Answer pages: upper = close, lower = next page. With allowFollowUp, holding
 // the lower button returns true: the caller asks a follow-up question.
-bool browseAnswerPages(const String& answer, int sourceCount, bool allowFollowUp = false) {
+bool browseAnswerPages(const String& answer, int sourceCount, bool allowFollowUp = false,
+                       const String& question = String()) {
   // The REC press that stopped speech belongs to playback, not navigation.
   // The caller has already displayed page one. Avoid another panel refresh.
   bool upperArmed = digitalRead(BTN_REC) == HIGH;
-  const int pages = askAnswerPageCount(answer);
+  // With a question, it is one more page after the answer's last page.
+  const int answerPages = askAnswerPageCount(answer);
+  const int pages = answerPages + (question.length() ? 1 : 0);
+  auto showPage = [&](int p) {
+    if (p < answerPages) showAskSpeakingPage(answer, sourceCount, p);
+    else showAskQuestion(question);
+  };
   int page = 0;
   bool lowerWasDown = digitalRead(BTN_PWR) == LOW;
   bool lowerArmed = !lowerWasDown;   // a press still held from before is not a new one
@@ -608,7 +615,7 @@ bool browseAnswerPages(const String& answer, int sourceCount, bool allowFollowUp
     if (!allowFollowUp) {
       if (lowerDown && !lowerWasDown) {
         page = (page + 1) % pages;
-        showAskSpeakingPage(answer, sourceCount, page);
+        showPage(page);
         closesAt = millis() + 15000UL;
       }
     } else {
@@ -616,7 +623,7 @@ bool browseAnswerPages(const String& answer, int sourceCount, bool allowFollowUp
       if (!lowerDown) {
         if (lowerWasDown && lowerArmed && lowerDownAt && millis() - lowerDownAt < BTN_LONG_MS) {
           page = (page + 1) % pages;
-          showAskSpeakingPage(answer, sourceCount, page);
+          showPage(page);
           closesAt = millis() + 15000UL;
         }
         lowerArmed = true;
@@ -1316,7 +1323,7 @@ bool askOneWebQuestion() {
       answered = true;
       showAskProgress("BUILDING", "VOICE");
       playBrainSpeech(answer, NOTES_DIR "/.webanswer.wav", 0);
-      showAskSpeaking(oracleQaText(question, answer), 0);
+      showAskSpeaking(answer, 0);
     }
   }
   stopWifi();
@@ -1326,8 +1333,8 @@ bool askOneWebQuestion() {
     return false;
   }
   oracleVoiceHistoryAdd(question, answer);
-  // The voice reply already left "Question / Answer" page one on screen.
-  return browseAnswerPages(oracleQaText(question, answer), 0, true);
+  // The answer is on screen; pressing cycles its pages and then the question.
+  return browseAnswerPages(answer, 0, true, question);
 }
 
 // Briefings are composed on the device (instant). Wi-Fi is only needed for

@@ -291,8 +291,7 @@ const char* askPhaseCopy(const char* action) {
 
 static void wrapParagraph(const String& raw, std::vector<String>& lines);
 
-// Lines for answer pages. A '\n' in the text starts a new line (used for
-// "Question: ..." / "Answer: ...").
+// Lines for answer pages. A '\n' in the text starts a new line.
 std::vector<String> answerLines(const String& raw) {
   std::vector<String> lines;
   int start = 0;
@@ -653,6 +652,19 @@ int askAnswerPageCount(const String& answer) {
   return max(1, (count + kAnswerLinesPerPage - 1) / kAnswerLinesPerPage);
 }
 
+// The question that was heard (web questions), shown before the answer and
+// as the last page when cycling through the answer.
+void showAskQuestion(const String& question) {
+  const std::vector<String> lines = answerLines(question);
+  clearWhite();
+  drawHeader(nullptr, BLACK);
+  labelLeft(kContentTop, uiText("FRAGE", "QUESTION"), 1, BLACK);
+  for (int i = 0; i < kAnswerLinesPerPage && i < static_cast<int>(lines.size()); i++)
+    labelLeft(65 + i * 18, lines[i].c_str(), 1, BLACK);
+  drawFooter(uiText("ANTWORT", "ANSWER"), uiText("ZURUECK", "BACK"), BLACK);
+  refreshAsync();
+}
+
 void showAskSpeakingPage(const String& answer, int sourceCount, int page) {
   const std::vector<String> lines = answerLines(answer);
   const int pages = max(1, (static_cast<int>(lines.size()) + kAnswerLinesPerPage - 1) / kAnswerLinesPerPage);
@@ -661,11 +673,8 @@ void showAskSpeakingPage(const String& answer, int sourceCount, int page) {
   char pageLabel[12];
   snprintf(pageLabel, sizeof(pageLabel), "%d/%d", page + 1, pages);
   drawHeader(pageLabel, BLACK);
-  // Web questions carry their own "Question:" / "Answer:" labels.
-  const bool questionAndAnswer = answer.startsWith("QUESTION: ") || answer.startsWith("FRAGE: ");
   labelLeft(kContentTop, sourceCount > 0 ? uiText("AUS ERINNERUNGEN", "FROM MEMORY")
-                         : questionAndAnswer ? uiText("WEBSUCHE", "WEB SEARCH")
-                         : uiText("ANTWORT", "ANSWER"), 1, BLACK);
+                                         : uiText("ANTWORT", "ANSWER"), 1, BLACK);
   const int first = page * kAnswerLinesPerPage;
   for (int i = 0; i < kAnswerLinesPerPage && first + i < static_cast<int>(lines.size()); i++)
     labelLeft(65 + i * 18, lines[first + i].c_str(), 1, BLACK);
