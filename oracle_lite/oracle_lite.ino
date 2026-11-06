@@ -1801,7 +1801,7 @@ void initializeDisplay() {
   // the controller base image, avoiding two slow full refreshes during wake.
 }
 
-void initializeStorage() {
+void initializeStorage(bool recoverOrphans) {
   SD_MMC.setPins(SD_CLK, SD_CMD, SD_D0);
   if (!SD_MMC.begin("/sdcard", true)) {
     showError("SD ERROR");
@@ -1811,7 +1811,7 @@ void initializeStorage() {
   // Only boot performs the comparatively expensive orphan-WAV recovery scan.
   // Normal reloads read the compact catalog, while search/vector indexes are
   // rebuilt lazily by the first operation that actually needs them.
-  loadIndex(true);
+  loadIndex(recoverOrphans);
   Serial.printf("[SD] %d memories\n", static_cast<int>(noteIndex.size()));
   migrateDueTimesToSingapore();
 }
@@ -1819,6 +1819,10 @@ void initializeStorage() {
 }  // namespace
 
 void setup() {
+  // Start-up timing in the serial log ("[Boot] audio at 812 ms").
+  auto bootStep = [](const char* what) {
+    Serial.printf("[Boot] %s at %lu ms\n", what, static_cast<unsigned long>(millis()));
+  };
   Serial.begin(115200);
   delay(40);
   Serial.println("\n=== Oracle Lite " FIRMWARE_VERSION " ===");
@@ -1867,22 +1871,41 @@ void setup() {
 
   i2c_master_Init();
   rtcSyncSystemFromChip();
+  bootStep("display + clock");
+
+  // Waking from sleep: draw Home straight away from the counts kept through
+  // sleep (the panel refresh runs on core 0 while the rest starts up).
+  setupRequired = !oracleHasWifi() || !oracleHasOpenAiKey();
+  const bool fromSleep = wokeFromUltraSleep || wokeForReminder;
+  bool homeShown = false;
+  if (fromSleep && !setupRequired) {
+    const BatteryReading battery = readBattery();
+    homeShown = showIdleFromCache(battery.valid ? battery.percent : -1);
+    if (homeShown) bootStep("home drawn (cached)");
+  }
+  // Join Wi-Fi right away, in the background; Home's icon updates when known.
+  startWakeWifi();
   delay(50);
   audio_bsp_init();
   audio_play_init();
-  initializeStorage();
+  bootStep("audio");
+  // The orphaned-recording scan is only needed after a power loss, not after
+  // a normal sleep.
+  initializeStorage(!fromSleep);
+  bootStep("sd card");
 
-  setupRequired = !oracleHasWifi() || !oracleHasOpenAiKey();
-  // Join Wi-Fi right away, in the background; Home's icon updates when known.
-  startWakeWifi();
+  state = STATE_IDLE;
   if (setupRequired) {
-    state = STATE_IDLE;
     showSetupRequired();
-  } else {
-    state = STATE_IDLE;
+  } else if (!homeShown || homeCacheStale()) {
     renderReadyHome();
+    bootStep("home drawn");
+  } else {
+    displayedHomeDay = localDayKey();
+    nextHomeClockCheckAt = millis() + 60000UL;
   }
 
+  bootStep("ready");
   logMemory("boot");
   // Waking is deliberately a separate interaction: PWR only wakes to Home.
   // Ignore the held wake press until both buttons are released so it cannot

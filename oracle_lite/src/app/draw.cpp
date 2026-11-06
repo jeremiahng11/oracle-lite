@@ -174,10 +174,14 @@ bool restoreFrameAfterWake() {
 }
 
 // Home is a rest point: clean the accumulated ghosting here, not mid-navigation.
+static void refreshCleanAsync();
+
 void refreshAtRest() {
   waitForDisplay();
   if (!epaperBaseReady || epaperPartialRefreshes >= kPartialRefreshesBeforeRestClean) {
-    refreshClean();
+    // The clean (full) waveform takes ~1.5-2 s; let it run on core 0 so
+    // start-up and button handling continue meanwhile.
+    refreshCleanAsync();
     return;
   }
   refreshAsync();
@@ -250,6 +254,25 @@ void refreshClean() {
   display->EPD_Init_Partial();
   epaperBaseReady = true;
   epaperPartialRefreshes = 0;
+}
+
+static void displayCleanTask(void*) {
+  display->EPD_Init();
+  display->EPD_DisplayPartBaseImage();
+  display->EPD_Init_Partial();
+  epaperBaseReady = true;
+  epaperPartialRefreshes = 0;
+  displayBusy = false;
+  vTaskDelete(nullptr);
+}
+
+static void refreshCleanAsync() {
+  waitForDisplay();
+  displayBusy = true;
+  if (xTaskCreatePinnedToCore(displayCleanTask, "epd-clean", 4096, nullptr, 1, nullptr, 0) != pdPASS) {
+    displayBusy = false;
+    refreshClean();
+  }
 }
 
 // ─── Large digit renderer ──────────────────────────────────────────────────

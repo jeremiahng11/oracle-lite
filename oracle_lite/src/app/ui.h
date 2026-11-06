@@ -10,6 +10,8 @@
 void setWifiIndicator(bool connected);
 bool wifiIndicatorState();
 bool homeWifiIconStale();   // Home shows an out-of-date Wi-Fi icon
+bool showIdleFromCache(int batteryPercent);   // Home from the pre-sleep counts
+bool homeCacheStale();
 void showIdle(int pendingCount = 0, int batteryPercent = -1);
 void showTodayAgenda(bool events, int page = 0);
 int todayAgendaPageCount(bool events);

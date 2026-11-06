@@ -437,17 +437,51 @@ bool wifiIndicatorState() { return wifiIndicatorConnected; }
 static bool shownWifiIcon = false;
 bool homeWifiIconStale() { return shownWifiIcon != wifiIndicatorConnected; }
 
+// Home's two counts survive deep sleep, so waking can draw Home before the
+// SD card and the agenda are loaded (same day only; the data cannot change
+// while asleep).
+RTC_DATA_ATTR static int homeCacheTasks = -1, homeCacheEvents = -1;
+RTC_DATA_ATTR static char homeCacheDay[11] = "";
+
+static void drawHome(int taskCount, int eventCount, int batteryPercent);
+
+bool showIdleFromCache(int batteryPercent) {
+  const String localNow = utcToLocalDeviceLabel(currentUtcIso());
+  if (homeCacheTasks < 0 || localNow.length() < 10 || localNow == "time not set" ||
+      localNow.substring(0, 10) != homeCacheDay) return false;
+  drawHome(homeCacheTasks, homeCacheEvents, batteryPercent);
+  return true;
+}
+
+static void homeCounts(int& taskCount, int& eventCount, String& dayKey);
+
+// True when the counts on a Home drawn from the sleep cache are out of date
+// (e.g. an appointment passed while asleep). Needs the SD card.
+bool homeCacheStale() {
+  int tasks = 0, events = 0;
+  String day;
+  homeCounts(tasks, events, day);
+  return tasks != homeCacheTasks || events != homeCacheEvents || day != homeCacheDay;
+}
+
 void showIdle(int pendingCount, int batteryPercent) {
-  clearWhite();
-  drawHeader(nullptr, BLACK);
-  drawBattery(batteryPercent);
-  drawWifiIndicator(wifiIndicatorConnected);
-  shownWifiIcon = wifiIndicatorConnected;
+  (void)pendingCount;
+  int taskCount = 0, eventCount = 0;
+  String todayKey;
+  homeCounts(taskCount, eventCount, todayKey);
+  homeCacheTasks = taskCount;
+  homeCacheEvents = eventCount;
+  strlcpy(homeCacheDay, todayKey.c_str(), sizeof(homeCacheDay));
+  drawHome(taskCount, eventCount, batteryPercent);
+}
+
+static void homeCounts(int& taskCount, int& eventCount, String& todayKeyOut) {
   const String nowUtc = currentUtcIso();
   const String localNow = utcToLocalDeviceLabel(nowUtc);
   const String todayKey = localNow.length() >= 10 && localNow != "time not set" ? localNow.substring(0, 10) : "";
+  todayKeyOut = todayKey;
   const std::vector<BrainTaskRecord> tasks = loadBrainTasks();
-  int taskCount = 0, eventCount = 0;
+  taskCount = 0; eventCount = 0;
   for (const BrainTaskRecord& task : tasks) {
     if (task.done) continue;
     if (!task.dueUtc.length()) {
@@ -464,6 +498,14 @@ void showIdle(int pendingCount, int batteryPercent) {
     }
     else if (dueDay <= todayKey) taskCount++;
   }
+}
+
+static void drawHome(int taskCount, int eventCount, int batteryPercent) {
+  clearWhite();
+  drawHeader(nullptr, BLACK);
+  drawBattery(batteryPercent);
+  drawWifiIndicator(wifiIndicatorConnected);
+  shownWifiIcon = wifiIndicatorConnected;
   const String date = homeDateLabel();
   labelLeft(kContentTop, date.c_str(), 1, BLACK);
   drawHero(uiText("HEUTE", "TODAY"), 63, BLACK, 109);
@@ -619,13 +661,18 @@ void showAskSpeakingPage(const String& answer, int sourceCount, int page) {
   char pageLabel[12];
   snprintf(pageLabel, sizeof(pageLabel), "%d/%d", page + 1, pages);
   drawHeader(pageLabel, BLACK);
-  labelLeft(kContentTop, sourceCount > 0 ? uiText("AUS ERINNERUNGEN", "FROM MEMORY") : uiText("ANTWORT", "ANSWER"), 1, BLACK);
+  // Web questions carry their own "Question:" / "Answer:" labels.
+  const bool questionAndAnswer = answer.startsWith("Question: ") || answer.startsWith("Frage: ");
+  labelLeft(kContentTop, sourceCount > 0 ? uiText("AUS ERINNERUNGEN", "FROM MEMORY")
+                         : questionAndAnswer ? uiText("WEBSUCHE", "WEB SEARCH")
+                         : uiText("ANTWORT", "ANSWER"), 1, BLACK);
   const int first = page * kAnswerLinesPerPage;
   for (int i = 0; i < kAnswerLinesPerPage && first + i < static_cast<int>(lines.size()); i++)
     labelLeft(65 + i * 18, lines[first + i].c_str(), 1, BLACK);
   drawFooter(page < pages - 1 ? uiText("WEITER", "NEXT") : uiText("ENDE", "END"),
              uiText("ZURUECK", "BACK"), BLACK);
-  refresh();
+  // On core 0, so a voice that is playing keeps getting data meanwhile.
+  refreshAsync();
 }
 
 void showTransferConnecting() {

@@ -1042,7 +1042,7 @@ int readVoiceReply(Client& client, uint32_t startedAt, uint32_t uploadedAt,
   String line, partialAnswer, serverError, errorBody, shownText;
   line.reserve(8192);
   bool ended = false, shown = false, playbackFailed = false;
-  uint32_t firstAudioAt = 0;
+  uint32_t firstAudioAt = 0, lastScreenAt = 0;
 
   auto feedBase64 = [&](const String& text) {
     if (!streamReady || playbackFailed || text.length() < 4) return;
@@ -1054,6 +1054,7 @@ int readVoiceReply(Client& client, uint32_t startedAt, uint32_t uploadedAt,
     if (!shown && stream.ready()) {
       shownText = oracleQaText(question, partialAnswer);
       showAskSpeaking(shownText, 0);
+      lastScreenAt = millis();
       shown = true;
       audioPlaying = true;
       stream.start();
@@ -1079,7 +1080,20 @@ int readVoiceReply(Client& client, uint32_t startedAt, uint32_t uploadedAt,
       Serial.printf("[Voice] < %c %s\n", kind, payload.substring(0, 160).c_str());
     lineCount++;
     if (kind == 'T') { question = anyText(payload, {"text", "question", "q"}); if (!shown) showAskProgress("BUILDING", nullptr); }
-    else if (kind == 'P') { const String part = anyText(payload, {"text", "t", "sentence", "answer"}); if (part.length()) partialAnswer += (partialAnswer.length() ? " " : "") + part; }
+    else if (kind == 'P') {
+      const String part = anyText(payload, {"text", "t", "sentence", "answer"});
+      if (part.length()) partialAnswer += (partialAnswer.length() ? " " : "") + part;
+      // Show the answer as it arrives while the voice plays (page one only
+      // changes until it is full; at most every 2.5 s).
+      if (shown && part.length() && millis() - lastScreenAt >= 2500UL) {
+        const String next = oracleQaText(question, partialAnswer);
+        if (askAnswerPageCount(shownText) == 1 || askAnswerPageCount(next) == 1) {
+          shownText = next;
+          showAskSpeaking(shownText, 0);
+          lastScreenAt = millis();
+        }
+      }
+    }
     else if (kind == 'B') feedBase64(payload);
     else if (kind == 'A') answer = anyText(payload, {"answer", "text", "a"});
     else if (kind == 'E') { ended = true; serverError = anyText(payload, {"error", "detail", "message"}); }
