@@ -507,7 +507,8 @@ void showTodayAgenda(bool events, int page) {
   }
   if (items.empty() || pages == 1) drawFooterCentered(uiText("NOCHMAL: ZURUECK", "AGAIN: BACK"), BLACK);
   else drawFooter(uiText("WEITER", "NEXT"), uiText("ZURUECK", "BACK"), BLACK);
-  refresh();
+  // Hand the panel update to core 0 so the buttons stay responsive.
+  refreshAsync();
 }
 
 void showRecording() {

@@ -1,4 +1,10 @@
 #pragma once
+#include <stdint.h>
+
+// Bumped on every committed write or deletion of stored data, so in-memory
+// caches (e.g. the task/appointment list) know to reload.
+extern volatile uint32_t gStorageGeneration;
+inline void storageChanged() { gStorageGeneration = gStorageGeneration + 1; }
 
 template <typename FileSystem, typename Path>
 bool recoverStoredFile(FileSystem& fs, const Path& path) {
@@ -17,6 +23,7 @@ bool commitStoredFile(FileSystem& fs, const Path& path, const Path& temp) {
     } else if (!fs.remove(backup.c_str())) return false;
   }
   if (fs.exists(path.c_str()) && !fs.rename(path.c_str(), backup.c_str())) return false;
+  storageChanged();
   if (fs.rename(temp.c_str(), path.c_str())) {
     // (only if there was an old version: removing a missing file logs an error)
     if (fs.exists(backup.c_str())) fs.remove(backup.c_str());

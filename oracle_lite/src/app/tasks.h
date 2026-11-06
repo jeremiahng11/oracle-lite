@@ -15,7 +15,8 @@ struct BrainTaskRecord {
   bool done = false;
 };
 
-std::vector<BrainTaskRecord> loadBrainTasks();
+std::vector<BrainTaskRecord> loadBrainTasks();   // cached in RAM
+void invalidateBrainTasks();
 std::vector<BrainTaskRecord> priorityBrainTasks(size_t limit = 3, int* openCount = nullptr);
 bool setBrainTaskDone(const String& id, bool done);
 int openBrainTaskCount();

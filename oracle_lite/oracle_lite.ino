@@ -1391,7 +1391,7 @@ PressResult classifyPress(int pin) {
 // Max pause between taps of one gesture. After two taps a little more time
 // is allowed for the third, so a slightly slow triple press is not taken as
 // a double press.
-constexpr uint32_t kTapGapMs = 450;
+constexpr uint32_t kTapGapMs = 350;
 constexpr uint32_t kThirdTapGapMs = 650;
 int readButtonGesture(bool upper) {
   const int pin = upper ? BTN_REC : BTN_PWR;
@@ -1401,6 +1401,7 @@ int readButtonGesture(bool upper) {
   if (edges == 0) { edges = 1; edgeAt = millis(); }   // pressed before the ISR saw it
   interrupts();
   uint32_t lastLowAt = digitalRead(pin) == LOW ? millis() : 0;
+  bool warmed = false;
   for (;;) {
     if (bothButtonsDown()) {
       companionGestureStartedAt = millis();
@@ -1423,6 +1424,9 @@ int readButtonGesture(bool upper) {
         return min<int>(count, 3);
       }
     } else {
+      // While waiting to see if more taps follow, load the agenda so a
+      // single press can show it straight away (instant when cached).
+      if (!warmed && count == 1) { warmed = true; loadBrainTasks(); }
       const uint32_t since = now - max(lastEdge, lastLowAt);
       if (count >= 3 || since >= (count >= 2 ? kThirdTapGapMs : kTapGapMs)) {
         noInterrupts(); edges = 0; interrupts();
@@ -1464,6 +1468,7 @@ void handleIdle() {
     resetActivity();
     lastUpperTapAt = 0;
     lastLowerTapAt = 0;
+    const uint32_t pressAt = upperTapEdges ? upperTapEdgeAt : millis();
     const int gesture = readButtonGesture(true);
     if (gesture < 0) return;
     if (gesture == 0) { captureMemory(); return; }
@@ -1475,6 +1480,7 @@ void handleIdle() {
     agendaPage = 0;
     agendaShownAt = millis();
     showTodayAgenda(false, agendaPage);
+    Serial.printf("[UI] tasks drawn %lu ms after the press\n", static_cast<unsigned long>(millis() - pressAt));
     return;
   }
   if (digitalRead(BTN_PWR) == LOW || lowerLatched) {
@@ -1482,6 +1488,7 @@ void handleIdle() {
     resetActivity();
     lastUpperTapAt = 0;
     lastLowerTapAt = 0;
+    const uint32_t pressAt = lowerTapEdges ? lowerTapEdgeAt : millis();
     const int gesture = readButtonGesture(false);
     if (gesture < 0) return;
     if (gesture == 0) { askBrain(); return; }
@@ -1493,6 +1500,7 @@ void handleIdle() {
     agendaPage = 0;
     agendaShownAt = millis();
     showTodayAgenda(true, agendaPage);
+    Serial.printf("[UI] appointments drawn %lu ms after the press\n", static_cast<unsigned long>(millis() - pressAt));
   }
 }
 

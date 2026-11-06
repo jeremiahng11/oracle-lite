@@ -153,6 +153,7 @@ bool updateIndexHasText(int num) {
 }
 
 bool deleteNote(int num) {
+  storageChanged();
   const char* exts[] = {"txt", "meta", "queue", "moments", "brain.json", "brain.vec", "wav", "om", nullptr};
   char path[64];
   for (int e = 0; exts[e]; e++) {

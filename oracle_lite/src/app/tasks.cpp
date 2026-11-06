@@ -92,7 +92,35 @@ std::vector<String> significantCompletionWords(const String& speech) {
 }
 }
 
+volatile uint32_t gStorageGeneration = 0;
+
+// Reading every note's memory from the SD card is the slowest part of
+// showing Tasks, Appointments, Home or a briefing. Keep the result in RAM
+// until something is stored or deleted, or the note list changes.
+static std::vector<BrainTaskRecord> cachedTasks;
+static bool cachedTasksValid = false;
+static uint32_t cachedGeneration = 0;
+static size_t cachedNoteCount = 0;
+static int cachedLastNote = -1;
+
+static std::vector<BrainTaskRecord> readBrainTasks();
+
 std::vector<BrainTaskRecord> loadBrainTasks() {
+  const int lastNote = noteIndex.empty() ? -1 : noteIndex.back().num;
+  if (cachedTasksValid && cachedGeneration == gStorageGeneration &&
+      cachedNoteCount == noteIndex.size() && cachedLastNote == lastNote) return cachedTasks;
+  const uint32_t generation = gStorageGeneration;
+  cachedTasks = readBrainTasks();
+  cachedGeneration = generation;
+  cachedNoteCount = noteIndex.size();
+  cachedLastNote = lastNote;
+  cachedTasksValid = true;
+  return cachedTasks;
+}
+
+void invalidateBrainTasks() { cachedTasksValid = false; }
+
+static std::vector<BrainTaskRecord> readBrainTasks() {
   std::vector<BrainTaskRecord> tasks;
   std::vector<TaskState> states = loadStates();
   std::sort(states.begin(), states.end(),
@@ -186,6 +214,7 @@ int openBrainTaskCount() {
 }
 
 void clearBrainTaskState() {
+  storageChanged();
   sdRemoveIfExists(kTaskStateFile);
   sdRemoveIfExists((String(kTaskStateFile) + ".bak").c_str());
   sdRemoveIfExists((String(kTaskStateFile) + ".tmp").c_str());
