@@ -673,7 +673,26 @@ bool minutesServiceOne(const std::function<void(const char*)>& phase, String& er
     bool failed = false;
     const int status = call(conn, "GET", "/api/recordings/" + fields["rid"], nullptr, nullptr, 0,
                             nullptr, 0, -1, &body);
-    if (status == 404) { error = "NOT ON SERVER YET"; return false; }
+    if (status == 404) {
+      // The server has no job for this recording (it never arrived or was
+      // lost). After two such answers, send the saved recording again; give
+      // up after two resends so it cannot loop forever.
+      const int missing = fields["missing"].toInt() + 1;
+      fields["missing"] = String(missing);
+      if (missing >= 2) {
+        const int resends = fields["resends"].toInt() + 1;
+        fields["missing"] = "0";
+        fields["resends"] = String(resends);
+        fields["state"] = resends > 2 ? "failed" : "recorded";
+        nextMinutesCheck.erase(note.num);
+        Serial.printf("[Minutes] %s not on server; %s\n", fields["rid"].c_str(),
+                      resends > 2 ? "giving up" : "sending it again");
+      }
+      writeSidecar(note.num, fields);
+      error = "NOT ON SERVER YET";
+      return false;
+    }
+    fields["missing"] = "0";
     if (status < 200 || status >= 300) { error = describe(status); return false; }
     const bool ready = jobReady(body, minutes, failed);
     if (failed) {

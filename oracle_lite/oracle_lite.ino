@@ -73,6 +73,10 @@ uint32_t lastUpperTapAt = 0;
 uint32_t lastLowerTapAt = 0;
 volatile bool upperPressLatched = false;
 volatile bool lowerPressLatched = false;
+// Press edges counted by the interrupt, so taps made while the loop is busy
+// (e-paper refresh, a background network check) still count as multi-taps.
+volatile uint8_t upperTapEdges = 0, lowerTapEdges = 0;
+volatile uint32_t upperTapEdgeAt = 0, lowerTapEdgeAt = 0;
 bool companionUpperWasDown = false;
 bool companionLowerWasDown = false;
 uint32_t companionVolumeShownAt = 0;
@@ -222,13 +226,36 @@ bool bothButtonsUp() {
   return digitalRead(BTN_REC) == HIGH && digitalRead(BTN_PWR) == HIGH;
 }
 
-void latchUpperPress() { upperPressLatched = true; }
-void latchLowerPress() { lowerPressLatched = true; }
+// Button interrupts (both edges). A press only counts as a new tap when the
+// button had been released for a stable 30 ms, so contact bounce on press or
+// release never turns one tap into two.
+volatile uint32_t upperReleasedAt = 0, lowerReleasedAt = 0;
+
+static inline void IRAM_ATTR buttonEdge(int pin, volatile bool& latched, volatile uint8_t& edges,
+                                        volatile uint32_t& edgeAt, volatile uint32_t& releasedAt) {
+  const bool low = ((REG_READ(GPIO_IN_REG) >> pin) & 1U) == 0;   // both buttons are GPIO < 32
+  const uint32_t now = millis();
+  if (!low) { releasedAt = now; return; }
+  latched = true;
+  if (now - releasedAt >= 30 && now - edgeAt >= 60) {
+    if (edges < 9) edges++;
+    edgeAt = now;
+  }
+}
+
+void IRAM_ATTR latchUpperPress() {
+  buttonEdge(BTN_REC, upperPressLatched, upperTapEdges, upperTapEdgeAt, upperReleasedAt);
+}
+void IRAM_ATTR latchLowerPress() {
+  buttonEdge(BTN_PWR, lowerPressLatched, lowerTapEdges, lowerTapEdgeAt, lowerReleasedAt);
+}
 
 void clearLatchedPresses() {
   noInterrupts();
   upperPressLatched = false;
   lowerPressLatched = false;
+  upperTapEdges = 0;
+  lowerTapEdges = 0;
   interrupts();
 }
 
@@ -1358,23 +1385,48 @@ PressResult classifyPress(int pin) {
   return digitalRead(pin) == LOW ? PressResult::LongSingle : PressResult::Released;
 }
 
-bool waitForSecondTap(int pin) {
-  const uint32_t deadline = millis() + ASK_DOUBLE_TAP_MS;
-  while (static_cast<int32_t>(deadline - millis()) > 0) {
-    if (bothButtonsDown()) return false;
+// Reads one button gesture: -1 = both buttons (Companion), 0 = hold,
+// 1..3 = number of taps. Taps are counted by the interrupt, so presses made
+// while the loop was busy are not lost. The gesture ends after a quiet gap.
+constexpr uint32_t kTapGapMs = 450;   // max pause between taps of one gesture
+int readButtonGesture(bool upper) {
+  const int pin = upper ? BTN_REC : BTN_PWR;
+  volatile uint8_t& edges = upper ? upperTapEdges : lowerTapEdges;
+  volatile uint32_t& edgeAt = upper ? upperTapEdgeAt : lowerTapEdgeAt;
+  noInterrupts();
+  if (edges == 0) { edges = 1; edgeAt = millis(); }   // pressed before the ISR saw it
+  interrupts();
+  uint32_t lastLowAt = digitalRead(pin) == LOW ? millis() : 0;
+  for (;;) {
+    if (bothButtonsDown()) {
+      companionGestureStartedAt = millis();
+      noInterrupts(); edges = 0; interrupts();
+      return -1;
+    }
+    const uint32_t now = millis();
+    noInterrupts();
+    const uint8_t count = edges;
+    const uint32_t lastEdge = edgeAt;
+    interrupts();
     if (digitalRead(pin) == LOW) {
-      delay(14);
-      if (digitalRead(pin) != LOW) continue;
-      // Consume the second short press, but never turn a held second press into
-      // another action after the briefing returns.
-      const uint32_t releaseDeadline = millis() + REC_HOLD_MS;
-      while (digitalRead(pin) == LOW &&
-             static_cast<int32_t>(releaseDeadline - millis()) > 0) delay(4);
-      return digitalRead(pin) == HIGH;
+      lastLowAt = now;
+      // A press held past the hold time: hold (first press) or the end of
+      // a tap sequence (count the taps, wait for release).
+      if (now - lastEdge >= REC_HOLD_MS) {
+        if (count <= 1) { noInterrupts(); edges = 0; interrupts(); return 0; }
+        while (digitalRead(pin) == LOW) delay(4);
+        noInterrupts(); edges = 0; interrupts();
+        return min<int>(count, 3);
+      }
+    } else {
+      const uint32_t since = now - max(lastEdge, lastLowAt);
+      if (count >= 3 || since >= kTapGapMs) {
+        noInterrupts(); edges = 0; interrupts();
+        return min<int>(count, 3);
+      }
     }
     delay(4);
   }
-  return false;
 }
 
 void handleIdle() {
@@ -1406,73 +1458,37 @@ void handleIdle() {
   if (digitalRead(BTN_REC) == LOW || (upperLatched && !lowerLatched)) {
     takeLatchedPress(true);
     resetActivity();
-    // A released edge captured during refresh is necessarily a short press.
-    if (digitalRead(BTN_REC) == HIGH) {
-      lastLowerTapAt = 0;
-      state = STATE_AGENDA;
-      agendaShowsEvents = false;
-      agendaPage = 0;
-      agendaShownAt = millis();
-      showTodayAgenda(false, agendaPage);
-      lastUpperTapAt = 0;
-      return;
-    }
-    const PressResult press = classifyPress(BTN_REC);
-    if (press == PressResult::Chord) return;
-    if (press == PressResult::LongSingle) {
-      lastUpperTapAt = 0;
-      captureMemory();
-    }
-    else {
-      // Top button: double press = meeting minutes, triple press = daily briefing.
-      if (waitForSecondTap(BTN_REC)) {
-        if (waitForSecondTap(BTN_REC)) playDailyBriefing();
-        else recordMeetingMinutes();
-        return;
-      }
-      lastLowerTapAt = 0;
-      state = STATE_AGENDA;
-      agendaShowsEvents = false;
-      agendaPage = 0;
-      agendaShownAt = millis();
-      showTodayAgenda(false, agendaPage);
-      lastUpperTapAt = 0;
-    }
+    lastUpperTapAt = 0;
+    lastLowerTapAt = 0;
+    const int gesture = readButtonGesture(true);
+    if (gesture < 0) return;
+    if (gesture == 0) { captureMemory(); return; }
+    // Top button: 1 = tasks, 2 = meeting minutes, 3 = daily briefing.
+    if (gesture == 2) { recordMeetingMinutes(); return; }
+    if (gesture >= 3) { playDailyBriefing(); return; }
+    state = STATE_AGENDA;
+    agendaShowsEvents = false;
+    agendaPage = 0;
+    agendaShownAt = millis();
+    showTodayAgenda(false, agendaPage);
     return;
   }
   if (digitalRead(BTN_PWR) == LOW || lowerLatched) {
     takeLatchedPress(false);
     resetActivity();
-    if (digitalRead(BTN_PWR) == HIGH) {
-      lastUpperTapAt = 0;
-      state = STATE_AGENDA;
-      agendaShowsEvents = true;
-      agendaPage = 0;
-      agendaShownAt = millis();
-      showTodayAgenda(true, agendaPage);
-      lastLowerTapAt = 0;
-      return;
-    }
-    const PressResult press = classifyPress(BTN_PWR);
-    if (press == PressResult::Chord) return;
-    if (press == PressResult::LongSingle) {
-      lastLowerTapAt = 0;
-      askBrain();
-    } else {
-      // Lower button: double press = weekly briefing, triple press = ask the web.
-      if (waitForSecondTap(BTN_PWR)) {
-        if (waitForSecondTap(BTN_PWR)) askWebByVoice();
-        else playWeeklyBriefing();
-        return;
-      }
-      lastUpperTapAt = 0;
-      state = STATE_AGENDA;
-      agendaShowsEvents = true;
-      agendaPage = 0;
-      agendaShownAt = millis();
-      showTodayAgenda(true, agendaPage);
-      lastLowerTapAt = 0;
-    }
+    lastUpperTapAt = 0;
+    lastLowerTapAt = 0;
+    const int gesture = readButtonGesture(false);
+    if (gesture < 0) return;
+    if (gesture == 0) { askBrain(); return; }
+    // Bottom button: 1 = appointments, 2 = weekly briefing, 3 = ask the web.
+    if (gesture == 2) { playWeeklyBriefing(); return; }
+    if (gesture >= 3) { askWebByVoice(); return; }
+    state = STATE_AGENDA;
+    agendaShowsEvents = true;
+    agendaPage = 0;
+    agendaShownAt = millis();
+    showTodayAgenda(true, agendaPage);
   }
 }
 
@@ -1800,8 +1816,8 @@ void setup() {
   WiFi.onEvent(onWifiEvent);
   pinMode(BTN_REC, INPUT_PULLUP);
   pinMode(BTN_PWR, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(BTN_REC), latchUpperPress, FALLING);
-  attachInterrupt(digitalPinToInterrupt(BTN_PWR), latchLowerPress, FALLING);
+  attachInterrupt(digitalPinToInterrupt(BTN_REC), latchUpperPress, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(BTN_PWR), latchLowerPress, CHANGE);
   board.VBAT_POWER_ON();
 
   const bool wokeFromUltraSleep = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1;
