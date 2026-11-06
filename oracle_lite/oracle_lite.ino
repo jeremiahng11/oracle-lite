@@ -1388,7 +1388,11 @@ PressResult classifyPress(int pin) {
 // Reads one button gesture: -1 = both buttons (Companion), 0 = hold,
 // 1..3 = number of taps. Taps are counted by the interrupt, so presses made
 // while the loop was busy are not lost. The gesture ends after a quiet gap.
-constexpr uint32_t kTapGapMs = 450;   // max pause between taps of one gesture
+// Max pause between taps of one gesture. After two taps a little more time
+// is allowed for the third, so a slightly slow triple press is not taken as
+// a double press.
+constexpr uint32_t kTapGapMs = 450;
+constexpr uint32_t kThirdTapGapMs = 650;
 int readButtonGesture(bool upper) {
   const int pin = upper ? BTN_REC : BTN_PWR;
   volatile uint8_t& edges = upper ? upperTapEdges : lowerTapEdges;
@@ -1420,7 +1424,7 @@ int readButtonGesture(bool upper) {
       }
     } else {
       const uint32_t since = now - max(lastEdge, lastLowAt);
-      if (count >= 3 || since >= kTapGapMs) {
+      if (count >= 3 || since >= (count >= 2 ? kThirdTapGapMs : kTapGapMs)) {
         noInterrupts(); edges = 0; interrupts();
         return min<int>(count, 3);
       }
@@ -1463,9 +1467,9 @@ void handleIdle() {
     const int gesture = readButtonGesture(true);
     if (gesture < 0) return;
     if (gesture == 0) { captureMemory(); return; }
-    // Top button: 1 = tasks, 2 = meeting minutes, 3 = daily briefing.
-    if (gesture == 2) { recordMeetingMinutes(); return; }
-    if (gesture >= 3) { playDailyBriefing(); return; }
+    // Top button: 1 = tasks, 2 = daily briefing, 3 = meeting minutes.
+    if (gesture == 2) { playDailyBriefing(); return; }
+    if (gesture >= 3) { recordMeetingMinutes(); return; }
     state = STATE_AGENDA;
     agendaShowsEvents = false;
     agendaPage = 0;

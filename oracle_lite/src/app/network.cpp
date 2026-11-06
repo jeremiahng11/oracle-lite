@@ -2345,8 +2345,8 @@ void handleSettingsPage() {
           "<div class='field'><label>" + String(viewerText("API-Key", "API key")) + "</label>"
           "<input name='minutesKey' maxlength='200' type='password' autocomplete='off' placeholder='" +
           String(oracleHasMinutesKey() ? viewerText("Gespeichert — nur zum Ersetzen eingeben", "Saved — enter only to replace") : "key_...") + "'></div></div>"
-          "<p class='helper'>" + String(viewerText("Oben zweimal drücken startet eine Besprechung, die live an Oracle Minutes gestreamt wird; erneut oben drücken beendet sie. Das Protokoll wird danach als Gedanke gespeichert. Oben dreimal: Tagesbriefing.",
-                                                   "Double-press the top button to start a meeting that streams live to Oracle Minutes; press the top button again to stop. The minutes are then saved as a memory you can ask about. Triple-press the top button for the daily briefing.")) + "</p>"
+          "<p class='helper'>" + String(viewerText("Oben dreimal drücken startet eine Besprechung, die live an Oracle Minutes gestreamt wird; erneut oben drücken beendet sie. Das Protokoll wird danach als Gedanke gespeichert. Oben zweimal: Tagesbriefing.",
+                                                   "Triple-press the top button to start a meeting that streams live to Oracle Minutes; press the top button again to stop. The minutes are then saved as a memory you can ask about. Double-press the top button for the daily briefing.")) + "</p>"
           "<div class='savebar'><button class='moment' type='submit'>" + String(viewerText("Minutes speichern", "Save Oracle Minutes")) + "</button></div></form>";
   if (oracleHasOpenAiKey()) {
     html += "<form action='/settings/key/clear' method='post' class='actions'>"

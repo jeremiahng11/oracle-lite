@@ -44,8 +44,8 @@ contains no personal credentials. Settings are stored on the device.
 | --- | --- | --- |
 | Top | 1× | Tasks |
 | Top | hold | Record a memory (release to save) |
-| Top | 2× | Record meeting minutes, streamed live to Oracle Minutes (top again to stop) |
-| Top | 3× | Daily briefing |
+| Top | 2× | Daily briefing |
+| Top | 3× | Record meeting minutes, streamed live to Oracle Minutes (top again to stop) |
 | Bottom | 1× | Appointments |
 | Bottom | hold | Ask a question (e.g. "What appointments do I have next week?") |
 | Bottom | 2× | Weekly briefing |
