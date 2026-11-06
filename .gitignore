@@ -1,0 +1,11 @@
+.pio/
+.vscode/
+.DS_Store
+*.bin
+*.elf
+*.map
+oracle_lite/*.ino.cpp
+# Keep personal build-time credentials out of version control.
+oracle_lite/secrets.h
+_backup_before_oracle/
+.stage_src.tar
