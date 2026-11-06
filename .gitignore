@@ -9,3 +9,4 @@ oracle_lite/*.ino.cpp
 oracle_lite/secrets.h
 _backup_before_oracle/
 .stage_src.tar
+ota/

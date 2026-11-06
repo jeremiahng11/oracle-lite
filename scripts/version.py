@@ -5,6 +5,8 @@
 # - After a successful upload (pio run -t upload) the rc number is raised by
 #   one, so the next flashed build is rc003, then rc004, ...
 #   Compiling without uploading never changes the number.
+# - `pio run -t ota` builds ota/oracle-lite-<version>.bin for the Web
+#   Companion's "Update firmware" and raises the rc number the same way.
 Import("env")
 import os
 import re
@@ -36,3 +38,25 @@ def bump_after_upload(source, target, env):
 
 
 env.AddPostAction("upload", bump_after_upload)
+
+
+def export_ota(source, target, env):
+    # `pio run -t ota`: build, copy the image to ota/oracle-lite-<version>.bin
+    # for the Web Companion's "Update firmware", then raise the rc number.
+    import shutil
+    current = read_version()
+    out_dir = os.path.join(env.subst("$PROJECT_DIR"), "ota")
+    os.makedirs(out_dir, exist_ok=True)
+    out = os.path.join(out_dir, "oracle-lite-%s.bin" % current)
+    shutil.copyfile(env.subst("$BUILD_DIR/firmware.bin"), out)
+    print("Firmware for Wi-Fi update: " + out)
+    bump_after_upload(source, target, env)
+
+
+env.AddCustomTarget(
+    name="ota",
+    dependencies="$BUILD_DIR/firmware.bin",
+    actions=[export_ota],
+    title="Build for Wi-Fi update",
+    description="Build firmware.bin into ota/ for the Web Companion and raise the version",
+)

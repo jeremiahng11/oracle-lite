@@ -2352,6 +2352,21 @@ void handleSettingsPage() {
     html += "<form action='/settings/key/clear' method='post' class='actions'>"
             "<button class='moment' type='submit' onclick=\"return confirm('" + String(viewerText("API-Key vom Gerät entfernen?", "Remove the API key from this device?")) + "')\">" + String(viewerText("API-Key entfernen", "Remove API key")) + "</button></form>";
   }
+  html += "<section class='card'><div class='num'>FIRMWARE</div><h2 class='title'>" +
+          String(viewerText("Firmware aktualisieren", "Update firmware")) + "</h2>"
+          "<p class='text'>" + String(viewerText("Installiert: ", "Installed: ")) + FIRMWARE_VERSION + ". " +
+          String(viewerText("Wähle die neue firmware.bin (.pio/build/oracle_lite/firmware.bin oder aus dem ota-Ordner). Oracle startet danach neu.",
+                            "Choose the new firmware.bin (from the ota folder, or .pio/build/oracle_lite/firmware.bin). Oracle restarts when it's done.")) + "</p>"
+          "<div class='field'><input type='file' id='fw' accept='.bin'></div>"
+          "<button type='button' id='fwgo'>" + String(viewerText("Hochladen und installieren", "Upload and install")) + "</button>"
+          "<p class='text' id='fwmsg'></p>"
+          "<script>document.getElementById('fwgo').onclick=function(){var f=document.getElementById('fw').files[0],m=document.getElementById('fwmsg'),b=this;"
+          "if(!f){m.textContent='" + String(viewerText("Bitte zuerst eine Datei wählen.", "Choose a file first.")) + "';return;}"
+          "var d=new FormData();d.append('firmware',f,f.name);var x=new XMLHttpRequest();x.open('POST','/firmware?size='+f.size);"
+          "x.upload.onprogress=function(e){if(e.lengthComputable)m.textContent=Math.round(e.loaded*100/e.total)+'%';};"
+          "x.onload=function(){m.textContent=x.responseText;b.disabled=false;};x.onerror=function(){m.textContent='" +
+          String(viewerText("Verbindung getrennt – Oracle startet vermutlich neu.", "Connection closed — Oracle is probably restarting.")) + "';};"
+          "b.disabled=true;m.textContent='0%';x.send(d);};</script></section>";
   html += "<form class='card danger' action='/memories/delete-all' method='post' "
           "onsubmit=\"return confirm(this.dataset.confirm)\" data-confirm='" + htmlEscape(viewerText("Wirklich alle Aufnahmen und Gedanken dauerhaft löschen?", "Permanently delete every recording and memory?")) + "'>"
           "<div class='num'>" + String(viewerText("GEFAHRENBEREICH", "DANGER ZONE")) + "</div><h2 class='title'>" + String(viewerText("Alle Gedanken löschen", "Erase this brain")) + "</h2>"
@@ -2361,6 +2376,99 @@ void handleSettingsPage() {
           "<button type='submit'>" + String(viewerText("Alle Gedanken löschen", "Delete every memory")) + "</button></form>";
   html += "</div></div></body></html>";
   transferServer.send(200, "text/html", html);
+}
+
+// ─── Firmware update over Wi-Fi (Web Companion) ─────────────────────────────
+// The companion hotspot is WPA2-protected, so only someone with the device
+// password can reach this. The upload is also checked to be an Oracle Lite
+// image before the new slot is marked bootable; a failed or foreign upload
+// leaves the running firmware untouched.
+#include <Update.h>
+#include "esp_app_format.h"
+#include "esp_app_desc.h"
+
+static String otaError;
+static bool otaProjectChecked = false;
+static uint8_t otaHead[sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) + sizeof(esp_app_desc_t)];
+static size_t otaHeadLen = 0;
+static int otaShownPercent = -1;
+// Every Oracle Lite image contains this text (it is the string below).
+static const char kOtaMarker[] = "Oracle-Lite-firmware-image:v1";
+static size_t otaMarkerPos = 0;
+static bool otaMarkerFound() { return otaMarkerPos == sizeof(kOtaMarker) - 1; }
+static void otaMarkerFeed(uint8_t b) {
+  if (b == (uint8_t)kOtaMarker[otaMarkerPos]) otaMarkerPos++;
+  else otaMarkerPos = (b == (uint8_t)kOtaMarker[0]) ? 1 : 0;
+}
+
+static void handleFirmwareUploadChunk() {
+  HTTPUpload& upload = transferServer.upload();
+  if (upload.status == UPLOAD_FILE_START) {
+    otaError = "";
+    otaProjectChecked = false;
+    otaHeadLen = 0;
+    otaShownPercent = -1;
+    otaMarkerPos = 0;
+    Serial.printf("[OTA] receiving %s\n", upload.filename.c_str());
+    showMeetingStatus("UPDATING", 0, "RECEIVING");
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) otaError = Update.errorString();
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (otaError.length()) return;
+    // Check the app description of the first bytes before writing anything.
+    if (!otaProjectChecked) {
+      const size_t take = min(sizeof(otaHead) - otaHeadLen, (size_t)upload.currentSize);
+      memcpy(otaHead + otaHeadLen, upload.buf, take);
+      otaHeadLen += take;
+      if (otaHeadLen == sizeof(otaHead)) {
+        const esp_app_desc_t* incoming = reinterpret_cast<const esp_app_desc_t*>(
+          otaHead + sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t));
+        if (otaHead[0] != ESP_IMAGE_HEADER_MAGIC || incoming->magic_word != ESP_APP_DESC_MAGIC_WORD)
+          otaError = "This is not an ESP32 firmware file (use firmware.bin).";
+        otaProjectChecked = true;
+        if (otaError.length()) { Update.abort(); return; }
+      }
+    }
+    for (size_t i = 0; i < upload.currentSize && !otaMarkerFound(); i++) otaMarkerFeed(upload.buf[i]);
+    if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+      otaError = Update.errorString();
+      Update.abort();
+      return;
+    }
+    const size_t total = transferServer.arg("size").toInt();
+    if (total > 0) {
+      const int percent = (int)((uint64_t)upload.totalSize * 100 / total);
+      if (percent / 20 != otaShownPercent / 20) {
+        otaShownPercent = percent;
+        showMeetingStatus("UPDATING", percent, "DON'T SWITCH OFF");
+      }
+    }
+  } else if (upload.status == UPLOAD_FILE_END) {
+    if (otaError.length()) return;
+    if (!otaProjectChecked) { otaError = "The file is too small to be firmware."; Update.abort(); return; }
+    // Only Oracle Lite builds carry this marker; anything else is refused
+    // before the new image is marked bootable.
+    if (!otaMarkerFound()) { otaError = "This firmware is not for Oracle Lite."; Update.abort(); return; }
+    if (!Update.end(true)) otaError = Update.errorString();
+    else Serial.printf("[OTA] %u bytes written\n", (unsigned)upload.totalSize);
+  } else if (upload.status == UPLOAD_FILE_ABORTED) {
+    Update.abort();
+    otaError = "Upload interrupted.";
+  }
+}
+
+static void handleFirmwareUploadDone() {
+  if (otaError.length() || !Update.isFinished()) {
+    const String reason = otaError.length() ? otaError : String("Update incomplete.");
+    Serial.printf("[OTA] failed: %s\n", reason.c_str());
+    showError("UPDATE FAILED");
+    transferServer.send(400, "text/plain", reason);
+    return;
+  }
+  transferServer.sendHeader("Connection", "close");
+  transferServer.send(200, "text/plain", "Updated. Oracle Lite is restarting…");
+  showMeetingStatus("UPDATED", 100, "RESTARTING");
+  delay(1200);
+  ESP.restart();
 }
 
 void handleMinutesSave() {
@@ -2558,6 +2666,7 @@ void setupTransferServer() {
   transferServer.on("/settings/wifi/update", HTTP_POST, handleWifiUpdate);
   transferServer.on("/settings/wifi/scan", HTTP_GET, handleWifiScan);
   transferServer.on("/settings/key/clear", HTTP_POST, handleKeyClear);
+  transferServer.on("/firmware", HTTP_POST, handleFirmwareUploadDone, handleFirmwareUploadChunk);
   transferServer.on("/api/notes", HTTP_GET, handlePortalJson);
   transferServer.on("/export.txt", HTTP_GET, handleExportTxt);
   transferServer.on("/txt",   HTTP_GET, [](){ sendFileByNum("txt", "text/plain", true); });
