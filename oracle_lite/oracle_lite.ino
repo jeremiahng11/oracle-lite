@@ -37,6 +37,7 @@ SET_LOOP_TASK_STACK_SIZE(16 * 1024);
 #include "src/app/settings.h"
 #include "src/app/sleep.h"
 #include "src/app/tasks.h"
+#include "src/app/reminders.h"
 #include "src/app/ui.h"
 
 board_power_bsp_t board(EPD_PWR_PIN, Audio_PWR_PIN, VBAT_PWR_PIN);
@@ -513,6 +514,38 @@ void returnFromBackgroundSync() {
   idleInputArmed = false;
   lastUpperTapAt = 0;
   lastLowerTapAt = 0;
+}
+
+// Appointment reminder: chime, show it, and speak it once Wi-Fi is up.
+// After a timer wake with nobody around, Oracle goes back to sleep soon.
+bool wokeForReminder = false;
+
+void runReminder() {
+  const String message = reminderTakeMessage();
+  if (!message.length()) return;
+  Serial.printf("[Reminder] %s\n", message.c_str());
+  state = STATE_ASKING;
+  showAskSpeaking(message, 1);
+  soundListening();
+  // A timer wake starts Wi-Fi in the background; give it a moment.
+  const uint32_t waitFrom = millis();
+  while (oracleHasWifi() && WiFi.status() != WL_CONNECTED && millis() - waitFrom < 10000UL &&
+         bothButtonsUp()) {
+    serviceWakeWifi();
+    delay(20);
+  }
+  if (WiFi.status() == WL_CONNECTED && bothButtonsUp())
+    playBrainSpeech(message, NOTES_DIR "/.oracle-reminder.wav", 1, true);
+  // Leave it on screen for a while (any button returns to Home).
+  clearLatchedPresses();
+  const uint32_t shownAt = millis();
+  while (millis() - shownAt < 20000UL && !upperPressLatched && !lowerPressLatched && bothButtonsUp()) delay(20);
+  returnToReady();
+  if (wokeForReminder) {
+    // Nobody pressed anything: sleep again ~20 s after the reminder.
+    lastActivityMs = millis() - (AUTO_SLEEP_IDLE_MS - 20000UL);
+    wokeForReminder = false;
+  }
 }
 
 void returnToReady() {
@@ -1746,6 +1779,7 @@ void setup() {
   board.VBAT_POWER_ON();
 
   const bool wokeFromUltraSleep = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1;
+  wokeForReminder = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER;
   Serial.printf("[Wake] cause=%d\n", static_cast<int>(esp_sleep_get_wakeup_cause()));
   if (wokeFromUltraSleep) {
     // EXT1 keeps the pin that caused wake-up even when a quick tap has already
@@ -1855,6 +1889,18 @@ void loop() {
     handleIdle();
     if (state == STATE_IDLE) handleBackgroundBrain();
     if (state == STATE_IDLE) handleMeetingBackground();
+    if (state == STATE_IDLE && !setupRequired) {
+      // Rescan the agenda every 5 minutes; check the cached reminder often.
+      static uint32_t nextReminderScan = 0, nextReminderCheck = 0;
+      if (!nextReminderScan || static_cast<int32_t>(millis() - nextReminderScan) >= 0) {
+        reminderRefresh();
+        nextReminderScan = millis() + 300000UL;
+      }
+      if (static_cast<int32_t>(millis() - nextReminderCheck) >= 0) {
+        nextReminderCheck = millis() + 5000UL;
+        if (reminderDue() && bothButtonsUp() && !upperPressLatched && !lowerPressLatched) runReminder();
+      }
+    }
     if (state == STATE_IDLE &&
         static_cast<int32_t>(millis() - nextHomeClockCheckAt) >= 0) {
       nextHomeClockCheckAt = millis() + 60000UL;

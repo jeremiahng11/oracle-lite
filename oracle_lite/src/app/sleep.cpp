@@ -8,6 +8,7 @@
 #include "network.h"
 #include "brain.h"
 #include "battery.h"
+#include "reminders.h"
 #include "../../sounds.h"
 #include "WiFi.h"
 #include "SD_MMC.h"
@@ -46,6 +47,15 @@ void enterUltraSleep() {
   // Keep the last e-paper home screen visible. Refreshing a dedicated sleep
   // screen would cost power and hide useful information for no benefit.
   // A small closed lock makes the persistent screen's sleeping state clear.
+  // Wake up on our own for the next appointment reminder (agenda read from
+  // the SD card now, before it is unmounted).
+  reminderRefresh();
+  const uint32_t reminderIn = reminderSecondsUntilNext();
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
+  if (reminderIn) {
+    esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(reminderIn) * 1000000ULL);
+    Serial.printf("[Sleep] reminder wake in %lu s\n", static_cast<unsigned long>(reminderIn));
+  }
   showSleepLocked();
   // A press during the panel refresh must still cancel sleep safely.
   if (digitalRead(BTN_PWR) == LOW) {
