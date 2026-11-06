@@ -1,0 +1,11 @@
+#!/bin/sh
+# Blocks commits that contain API keys or the private secrets.h.
+# Install once:  cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+if git diff --cached --name-only | grep -qE '(^|/)secrets\.h$|\.env$'; then
+  echo "pre-commit: secrets.h / .env must not be committed." >&2; exit 1
+fi
+if git diff --cached -U0 | grep -E '^\+' | grep -qE 'sk-[A-Za-z0-9_-]{16,}|key_[A-Za-z0-9]{12,}|Bearer [A-Za-z0-9._-]{20,}|#define[[:space:]]+[A-Z_]*KEY[[:space:]]+"[^"]{8,}"'; then
+  echo "pre-commit: this change looks like it contains an API key. Remove it (keys belong in the Web Companion or secrets.h)." >&2
+  exit 1
+fi
+exit 0

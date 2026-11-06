@@ -10,3 +10,8 @@ oracle_lite/secrets.h
 _backup_before_oracle/
 .stage_src.tar
 ota/
+# Never commit keys: any secrets*.h (except the example) or env files.
+oracle_lite/secrets*.h
+!oracle_lite/secrets.example.h
+*.env
+.env*
