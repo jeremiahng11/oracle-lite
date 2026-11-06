@@ -42,6 +42,7 @@ contains no personal credentials. Settings are stored on the device.
 
 | Button | Press | Action |
 | --- | --- | --- |
+| Top | 1× | Tasks |
 | Top | hold | Record a memory (release to save) |
 | Top | 2× | Record meeting minutes, streamed live to Oracle Minutes (top again to stop) |
 | Top | 3× | Daily briefing |
