@@ -1,7 +1,6 @@
 #include <Arduino.h>
 #include <SD_MMC.h>
 #include <WiFi.h>
-#include <WebServer.h>
 #include <ArduinoJson.h>
 #include <esp_partition.h>
 #include <vector>
@@ -50,7 +49,6 @@ AppState state = STATE_IDLE;
 int lastRecNum = -1;
 uint32_t lastActivityMs = 0;
 
-WebServer transferServer(80);
 bool transferServerActive = false;
 String transferUrl;
 
@@ -886,9 +884,7 @@ void enterCompanion() {
     syncTimeFromNTP(5000);
   }
 
-  setupTransferServer();
-  transferServer.begin();
-  transferServerActive = true;
+  transferServerActive = companionServerStart();
   // http://oracle.local works on the same network (and on the hotspot).
   if (MDNS.begin("oracle")) {
     MDNS.setInstanceName("Oracle Lite");
@@ -1758,7 +1754,6 @@ void handleBackgroundBrain() {
 }
 
 void handleCompanion() {
-  if (transferServerActive) transferServer.handleClient();
 
   const bool upperDown = digitalRead(BTN_REC) == LOW;
   const bool lowerDown = digitalRead(BTN_PWR) == LOW;

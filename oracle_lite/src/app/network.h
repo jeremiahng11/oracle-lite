@@ -33,5 +33,17 @@ bool synthesizeBrainSpeech(const String& text, const char* outputPath, bool fast
 bool playBrainSpeech(const String& text, const char* fallbackPath, int sourceCount, bool fast = true);
 int processPendingNotes(int preferredNote = -1, int maxNotes = 1);
 
-void setupTransferServer();
 void stopTransferMode();
+
+// Shared with the Web Companion server (companion_server.cpp).
+bool openAiJsonPost(const char* endpoint, const String& payload, String& response,
+                    uint16_t timeoutMs = 0, String* failure = nullptr);
+String responseOutputText(const String& response);
+String readSmallFile(const char* path, size_t maxLen);
+String localizedQueueState(const String& state);
+String localizedQueueError(const String& error);
+void oracleApplyWifiRegion();
+
+// Web Companion (fast single-page app + JSON API on esp_http_server).
+bool companionServerStart();
+void companionServerStop();

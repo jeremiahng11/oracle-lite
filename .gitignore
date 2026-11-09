@@ -15,3 +15,5 @@ oracle_lite/secrets*.h
 !oracle_lite/secrets.example.h
 *.env
 .env*
+oracle_lite/src/app/web_app_gz.h
+web/screens/

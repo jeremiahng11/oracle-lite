@@ -74,13 +74,25 @@ password whenever Oracle opens its own "Oracle Lite" Wi-Fi; "Fixed password"
 uses the one you save (8–63 characters, stored encrypted). Either way the
 password is shown on the screen.
 
-### Files in the Web Companion
+### Web Companion
 
-Web Companion → Files lists the SD card: download any file, or tick files and
-delete them (a memory's file deletes the whole memory, so nothing is left
-half-removed; the catalog and index files are protected). "Find recordings
-with no speech" checks your memories (not meetings) for empty transcripts or
-audio without speech, lets you listen, and deletes the ones you tick.
+The Companion is a single-page app (`web/app.html`) that the device serves
+once, gzipped and cached by the browser; after that, switching pages is
+instant and actions (tick a task, delete a memory, delete files) update in
+place. The device only answers a small JSON API (`web/API.md`) from
+ESP-IDF's HTTP server, which runs in its own task with keep-alive and several
+sockets. Memory cards are cached in PSRAM for the session; recordings stream
+with HTTP Range in 512 KB pieces.
+
+`scripts/web_embed.py` packs `web/app.html` into the firmware at build time.
+To work on the app without the device: `python3 web/mock_server.py` and open
+http://localhost:8000.
+
+Files: lists the SD card, downloads any file, and deletes ticked files (a
+memory's file deletes the whole memory; the catalog and index files are
+protected). "Find recordings with no speech" checks memories (not meetings)
+for empty transcripts or audio without speech, lets you listen, and deletes
+the ones you tick.
 
 New memories that contain only background noise are not saved at all
 ("NO VOICE / NOT SAVED").
