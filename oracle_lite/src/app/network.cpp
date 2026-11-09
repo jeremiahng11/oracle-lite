@@ -601,7 +601,7 @@ bool understandNote(int noteNum) {
     " Set the language field to " + outputLanguageCode + "." +
     (oracleVocabulary().length() ? String(" The user's own names and terms are: ") + oracleVocabulary() +
        ". Speech recognition sometimes misspells them; when a word clearly sounds like one of these (e.g. 'maco' or 'main call' for "
-       "'Manco'), write it exactly as listed, keeping its capitalisation.") : String(""));
+       "'Manco'), write it exactly as listed, keeping its capitalisation." : String(""));
   request["input"] = String("Required output language: ") + outputLanguage + " (" + outputLanguageCode + ")" +
                      "\nCaptured UTC: " + capturedUtc +
                      "\nCaptured local time: " + capturedLocal +
