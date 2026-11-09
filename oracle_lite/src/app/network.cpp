@@ -578,6 +578,8 @@ bool understandNote(int noteNum) {
     "Relative words such as heute/today and morgen/tomorrow always refer to the supplied local dates, "
     "not the UTC date. Convert the resulting local wall-clock time to UTC with the supplied offset. "
     "Double-check that tomorrow is strictly the calendar day after today. Resolve weekdays against the supplied calendar. "
+    "When only a clock time is given with no day (e.g. 'meeting 9:30'), use the next occurrence of that time after the "
+    "captured local time: today if it is still ahead, otherwise tomorrow; set datePrecision=time and confidence 75. "
     "For ambiguous expressions such as later, soon, sometime, or next time, leave dueUtc empty. Never invent a date. "
     "Set datePrecision=time only when a clock time is explicit, day when only a calendar day is known, otherwise none. "
     "Copy the exact temporal phrase into originalTimeText and rate date interpretation confidence from 0 to 100. "
@@ -1026,8 +1028,10 @@ bool answerAgendaQuestion(const String& question, String& answer, std::vector<in
   for (const BrainTaskRecord& item : loadBrainTasks()) {
     if (item.done) continue;
     if (!item.dueUtc.length()) {
-      // Undated tasks belong to "open/today" overviews only.
+      // Undated tasks belong to "open/today" overviews only; undated
+      // appointments are listed when asking what's coming up.
       if (taskIntent && item.type != "event" && (upcoming || range.includeOverdue)) tasks.push_back(item);
+      else if (eventIntent && item.type == "event" && upcoming) events.push_back(item);
       continue;
     }
     const String localDue = utcToLocalDeviceLabel(item.dueUtc);
@@ -1068,6 +1072,8 @@ bool answerAgendaQuestion(const String& question, String& answer, std::vector<in
   }
 
   auto byDue = [past](const BrainTaskRecord& a, const BrainTaskRecord& b) {
+    // Undated items go last.
+    if (a.dueUtc.isEmpty() != b.dueUtc.isEmpty()) return b.dueUtc.isEmpty();
     return past ? a.dueUtc > b.dueUtc : a.dueUtc < b.dueUtc;
   };
   std::sort(events.begin(), events.end(), byDue);
@@ -1176,11 +1182,12 @@ static bool buildLocalBriefing(int days, String& answer, int& taskCount, int& ev
   const std::string lastDay = agenda::dayString(agenda::dayNumber(today.c_str()) + days - 1);
   const bool german = oracleUiLanguage() == "de";
 
-  std::vector<BrainTaskRecord> events, due, overdue, open;
+  std::vector<BrainTaskRecord> events, due, overdue, open, undatedEvents;
   for (const BrainTaskRecord& task : loadBrainTasks()) {
     if (task.done) continue;
     if (!task.dueUtc.length()) {
-      if (task.type != "event") open.push_back(task);
+      if (task.type == "event") undatedEvents.push_back(task);
+      else open.push_back(task);
       continue;
     }
     const String localDue = utcToLocalDeviceLabel(task.dueUtc);
@@ -1250,7 +1257,12 @@ static bool buildLocalBriefing(int days, String& answer, int& taskCount, int& ev
                        : " Plus " + String(open.size()) + " open " + (open.size() == 1 ? "task" : "tasks") + " without a date.";
     }
   }
-  if (events.empty() && taskCount == 0)
+  if (!undatedEvents.empty()) {
+    // Appointments whose day wasn't said: mention them so none is forgotten.
+    answer += german ? " Ohne Datum: " : " Not scheduled yet: ";
+    answer += briefingList(undatedEvents, 3, false, today, tomorrow, german) + ".";
+  }
+  if (events.empty() && taskCount == 0 && undatedEvents.empty())
     answer = german ? (weekly ? "Die nächsten sieben Tage sind frei. Keine Termine und keine fälligen Aufgaben."
                               : "Heute ist nichts geplant. Keine Termine und keine fälligen Aufgaben.")
                     : (weekly ? "Your next seven days are clear. No appointments or tasks due."
