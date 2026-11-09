@@ -62,6 +62,13 @@ itself from sleep for it and goes back to sleep afterwards. A meeting started
 below 25 % battery asks first (top = record anyway, bottom = cancel) and a
 meeting stops and saves itself at 3 %.
 
+### Hotspot password
+
+Setup → Hotspot: "New each time" (default) makes a random `Ora-XXXXXXXX`
+password whenever Oracle opens its own "Oracle Lite" Wi-Fi; "Fixed password"
+uses the one you save (8–63 characters, stored encrypted). Either way the
+password is shown on the screen.
+
 ### Files in the Web Companion
 
 Web Companion → Files lists the SD card: download any file, or tick files and

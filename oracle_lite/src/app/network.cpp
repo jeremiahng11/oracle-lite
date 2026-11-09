@@ -2358,6 +2358,20 @@ void handleSettingsPage() {
           "</div></div>"
           "<p class='helper'>" + String(viewerText("Der API-Key bleibt im privaten Gerätespeicher und wird auf dieser Seite nie angezeigt.", "The API key stays in private device storage and is never shown on this page.")) + "</p>"
           "<div class='savebar'><button class='moment' type='submit'>" + String(viewerText("Verbindung speichern", "Save connection")) + "</button></div></form>";
+  html += "<form class='card wide' action='/settings/hotspot' method='post'><div class='settingintro'><div><div class='num'>" +
+          String(viewerText("HOTSPOT", "HOTSPOT")) + "</div><h2 class='title'>" +
+          String(viewerText("Passwort des Oracle-Lite-WLANs.", "Oracle Lite hotspot password.")) + "</h2></div></div>"
+          "<div class='settingsgrid'><div class='field'><label>" + String(viewerText("Modus", "Mode")) + "</label>"
+          "<select name='apMode'><option value='dynamic'" + String(oracleApPasswordFixed() ? "" : " selected") + ">" +
+          String(viewerText("Jedes Mal neu (sicherer)", "New each time (safer)")) + "</option>"
+          "<option value='fixed'" + String(oracleApPasswordFixed() ? " selected" : "") + ">" +
+          String(viewerText("Festes Passwort", "Fixed password")) + "</option></select></div>"
+          "<div class='field'><label>" + String(viewerText("Festes Passwort (8–63 Zeichen)", "Fixed password (8–63 characters)")) + "</label>"
+          "<input name='apPassword' type='password' minlength='8' maxlength='63' autocomplete='new-password' autocorrect='off' autocapitalize='off' placeholder='" +
+          String(oracleHasApPassword() ? viewerText("Gespeichert — nur zum Ersetzen eingeben", "Saved — enter only to replace") : viewerText("z. B. mein-oracle-2026", "e.g. my-oracle-2026")) + "'></div></div>"
+          "<p class='helper'>" + String(viewerText("Gilt, wenn Oracle kein gespeichertes WLAN findet und sein eigenes WLAN „Oracle Lite“ öffnet. Das Passwort steht dann auch auf dem Display.",
+                                                   "Used when Oracle can't join a saved Wi-Fi and opens its own \"Oracle Lite\" Wi-Fi. The password is also shown on the screen then.")) + "</p>"
+          "<div class='savebar'><button class='moment' type='submit'>" + String(viewerText("Hotspot speichern", "Save hotspot")) + "</button></div></form>";
   html += "<form class='card wide' action='/settings/minutes' method='post'><div class='settingintro'><div><div class='num'>ORACLE MINUTES</div>"
           "<h2 class='title'>" + String(viewerText("Besprechungen live aufnehmen.", "Record meetings live.")) + "</h2></div></div>"
           "<div class='settingsgrid'><div class='field'><label>" + String(viewerText("Server", "Server")) + "</label>"
@@ -2754,6 +2768,19 @@ static void handleFirmwareUploadDone() {
   ESP.restart();
 }
 
+void handleHotspotSave() {
+  const bool fixed = transferServer.arg("apMode") == "fixed";
+  String password = transferServer.arg("apPassword");
+  if (!oracleSetApPassword(fixed, password)) {
+    transferServer.send(400, "text/plain", fixed && !password.length() && !oracleHasApPassword()
+      ? "Enter a fixed password (8-63 characters) first."
+      : "The password must be 8-63 characters (letters, numbers and symbols).");
+    return;
+  }
+  transferServer.sendHeader("Location", "/settings?saved=1");
+  transferServer.send(303);
+}
+
 void handleMinutesSave() {
   String url = transferServer.arg("minutesUrl");
   String key = transferServer.arg("minutesKey");
@@ -2945,6 +2972,7 @@ void setupTransferServer() {
   transferServer.on("/settings/save", HTTP_POST, handleSettingsSave);
   transferServer.on("/settings/language", HTTP_POST, handleLanguageSave);
   transferServer.on("/settings/minutes", HTTP_POST, handleMinutesSave);
+  transferServer.on("/settings/hotspot", HTTP_POST, handleHotspotSave);
   transferServer.on("/settings/wifi/remove", HTTP_POST, handleWifiRemove);
   transferServer.on("/settings/wifi/update", HTTP_POST, handleWifiUpdate);
   transferServer.on("/settings/wifi/scan", HTTP_GET, handleWifiScan);

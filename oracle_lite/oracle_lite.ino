@@ -866,11 +866,14 @@ void enterCompanion() {
   if (!joinedSavedNetwork) {
     stopWifi();
     WiFi.mode(WIFI_AP);
-    char password[16];
-    // Generate a fresh setup password instead of deriving a predictable one
-    // from the public device identity.
-    snprintf(password, sizeof(password), "Ora-%08lX", static_cast<unsigned long>(esp_random()));
-    accessPointPassword = password;
+    if (oracleApPasswordFixed()) {
+      accessPointPassword = oracleApPassword();   // the fixed one from Setup
+    } else {
+      char password[16];
+      // A fresh random password each time (Setup → Hotspot can fix one).
+      snprintf(password, sizeof(password), "Ora-%08lX", static_cast<unsigned long>(esp_random()));
+      accessPointPassword = password;
+    }
     if (!WiFi.softAP("Oracle Lite", accessPointPassword.c_str())) {
       showError("WIFI ERROR");
       delay(1400);

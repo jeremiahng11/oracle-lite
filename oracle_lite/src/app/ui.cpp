@@ -701,7 +701,15 @@ void showTransferMode(const char* ip, const char* apPassword) {
     labelLeft(kContentTop, "JOIN WI-FI", 1, BLACK);
     drawHero("ORACLE LITE", 66, BLACK, 100);
     labelLeft(112, "PASSWORD", 1, BLACK);
-    labelLeft(132, apPassword, 2, BLACK);
+    // Large type fits ~14 characters; longer fixed passwords use small type
+    // (two lines beyond ~30 characters).
+    const String pw = apPassword;
+    if (pw.length() <= 14) labelLeft(132, apPassword, 2, BLACK);
+    else if (pw.length() <= 30) labelLeft(132, apPassword, 1, BLACK);
+    else {
+      labelLeft(128, pw.substring(0, 30).c_str(), 1, BLACK);
+      labelLeft(142, pw.substring(30).c_str(), 1, BLACK);
+    }
     drawFooter("SETUP", ip, BLACK);
   } else {
     labelLeft(kContentTop, "OPEN IN BROWSER", 1, BLACK);

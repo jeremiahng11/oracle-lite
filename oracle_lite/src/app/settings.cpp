@@ -22,7 +22,7 @@ static String wifiKey(int index, const char* suffix) {
 
 // Wi-Fi passwords and API keys are stored encrypted with the chip key.
 static bool secretKey(const String& key) {
-  if (key == "openai_key" || key == "om_key" || key == "wifi_pass") return true;
+  if (key == "openai_key" || key == "om_key" || key == "wifi_pass" || key == "ap_pass") return true;
   // Wi-Fi profile passwords: wifi0p .. wifi9p (never the SSIDs wifiNs).
   return key.length() == 6 && key.startsWith("wifi") && isDigit(key[4]) && key[5] == 'p';
 }
@@ -50,7 +50,7 @@ static bool secretsReadable() {
     String plain;
     return secureDecrypt(key, raw, plain);
   };
-  if (!readable("openai_key") || !readable("om_key") || !readable("wifi_pass")) return false;
+  if (!readable("openai_key") || !readable("om_key") || !readable("wifi_pass") || !readable("ap_pass")) return false;
   for (int i = 0; i < ORACLE_MAX_WIFI_PROFILES; i++) if (!readable(wifiKey(i, "p"))) return false;
   return true;
 }
@@ -74,7 +74,7 @@ static size_t putValue(const String& key, const String& text) {
 static void sealPlainSecrets() {
   if (!secureStoreReady()) return;
   int sealed = 0;
-  const char* fixed[] = {"openai_key", "om_key", "wifi_pass"};
+  const char* fixed[] = {"openai_key", "om_key", "wifi_pass", "ap_pass"};
   auto seal = [&](const String& key) {
     if (!prefs.isKey(key.c_str())) return;
     const String raw = prefs.getString(key.c_str(), "");
@@ -335,4 +335,30 @@ bool oracleClearMinutesKey() {
   oracleSettingsBegin();
   if (!ready) return false;
   return !prefs.isKey("om_key") || prefs.remove("om_key");
+}
+
+
+// ─── Companion hotspot password ──────────────────────────────────────────────
+// Dynamic (default): a new random "Ora-XXXXXXXX" every time the hotspot opens.
+// Fixed: the saved password is used every time (stored encrypted).
+bool oracleApPasswordFixed() {
+  oracleSettingsBegin();
+  return ready && prefs.getBool("ap_fixed", false) && value("ap_pass").length() >= 8;
+}
+
+String oracleApPassword() { return value("ap_pass"); }
+bool oracleHasApPassword() { return value("ap_pass").length() >= 8; }
+
+bool oracleSetApPassword(bool fixed, const String& password) {
+  oracleSettingsBegin();
+  if (!ready) return false;
+  if (password.length()) {
+    // WPA2: 8-63 printable ASCII characters.
+    if (password.length() < 8 || password.length() > 63) return false;
+    for (size_t i = 0; i < password.length(); i++)
+      if (password[i] < 32 || password[i] > 126) return false;
+    if (putValue("ap_pass", password) != password.length()) return false;
+  }
+  if (fixed && !oracleHasApPassword()) return false;   // nothing to use yet
+  return prefs.putBool("ap_fixed", fixed) == 1;
 }

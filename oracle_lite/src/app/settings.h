@@ -40,6 +40,11 @@ bool oracleClearOpenAiKey();
 constexpr const char* ORACLE_MINUTES_DEFAULT_URL = "";
 String oracleMinutesUrl();
 String oracleMinutesKey();
+// Web Companion hotspot password: fixed (saved) or a new random one each time.
+bool oracleApPasswordFixed();
+bool oracleHasApPassword();
+String oracleApPassword();
+bool oracleSetApPassword(bool fixed, const String& password);
 bool oracleHasMinutesKey();
 bool oracleSaveMinutes(const String& url, const String& apiKey);
 bool oracleClearMinutesKey();
