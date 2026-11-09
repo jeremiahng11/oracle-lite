@@ -1,6 +1,9 @@
 #pragma once
 
 bool record();
+// Whether the last record()/recordQuestion() contained speech (not only noise).
+bool lastRecordingHadSpeech();
+int lastRecordingSpeechMs();
 bool recordQuestion(const char* path, int holdPin);
 // Records until either button is pressed (after the starting press is
 // released) or maxMs passes. Shows the Ask "listening" screen.

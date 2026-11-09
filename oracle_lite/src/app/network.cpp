@@ -1638,7 +1638,7 @@ String formatMoment(uint32_t ms) {
   return String(out);
 }
 
-static String portalCss() {
+static String portalCssFull() {
   return String(
     "<link rel='icon' type='image/svg+xml' href=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7.2' fill='%230f1419'/%3E%3Cg transform='translate(4,5)' fill='none' stroke-linecap='round' stroke-width='2.4'%3E%3Cpath d='M3 9v4' stroke='%236a9cf0'/%3E%3Cpath d='M7.5 5v12' stroke='%23f09a5c'/%3E%3Cpath d='M12 8v6' stroke='%234fc08a'/%3E%3Cpath d='M16.5 3v16' stroke='%23e070a8'/%3E%3Cpath d='M21 9v4' stroke='%23a08af0'/%3E%3C/g%3E%3C/svg%3E\"><meta name='theme-color' content='#eef1f4' media='(prefers-color-scheme: light)'><meta name='theme-color' content='#0f1419' media='(prefers-color-scheme: dark)'><style>"
     ":root{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Arial,Helvetica,sans-serif;font-synthesis:none;--paper:#eef1f4;--surface:#ffffff;--sunk:#f6f8fa;--ink:#18212b;--muted:#5d6b7a;--line:#d7dee6;--accent:#2147b8;--accent-ink:#ffffff;--soft:#e7ecf1;--lilac:#ebe6fa;--sand:#e4edfa;--text:#2a3541;--warn:#b42318;--warnbg:#fbe4e1;--warnline:#f0b8b1;--ok:#1f7a4d;--okbg:#dcf1e5;--okline:#a9d8bf;--navbg:rgba(225,231,238,.94);--navink:#5d6b7a;--field:#ffffff;--focusring:rgba(33,71,184,.16);--shadow:rgba(24,33,43,.07);--navshadow:rgba(24,33,43,.14);--s1:#2f6fd6;--s2:#e07a2e;--s3:#23935f;--s4:#b23f78;--s5:#7354cc;color-scheme:light;color:var(--ink);background:var(--paper);}"
@@ -1681,6 +1681,21 @@ static String portalCss() {
   );
 }
 
+// Pages link one cached stylesheet instead of carrying ~20 KB of CSS each.
+static String portalCss() {
+  const String full = portalCssFull();
+  const int style = full.indexOf("<style>");
+  return (style > 0 ? full.substring(0, style) : String("")) +
+         "<link rel='stylesheet' href='/style.css?v=" FIRMWARE_VERSION "'>";
+}
+
+static void handlePortalStyle() {
+  const String full = portalCssFull();
+  const int a = full.indexOf("<style>"), b = full.lastIndexOf("</style>");
+  transferServer.sendHeader("Cache-Control", "public, max-age=31536000, immutable");
+  transferServer.send(200, "text/css", a >= 0 && b > a ? full.substring(a + 7, b) : String(""));
+}
+
 static String portalNav(const String& active) {
   auto link = [&](const String& id, const String& href, const String& icon,
                   const String& deLabel, const String& enLabel) {
@@ -1692,12 +1707,14 @@ static String portalNav(const String& active) {
   const String memoriesIcon = "<svg viewBox='0 0 24 24' aria-hidden='true'><path d='M6 6h14M6 12h14M6 18h14'/><circle cx='3' cy='6' r='.5'/><circle cx='3' cy='12' r='.5'/><circle cx='3' cy='18' r='.5'/></svg>";
   const String tasksIcon = "<svg viewBox='0 0 24 24' aria-hidden='true'><path d='m4 12 4 4L20 5'/></svg>";
   const String calendarIcon = "<svg viewBox='0 0 24 24' aria-hidden='true'><rect x='3' y='5' width='18' height='16' rx='3'/><path d='M7 3v4M17 3v4M3 10h18'/><path d='M7 14h2M11 14h2M15 14h2M7 17h2M11 17h2M15 17h2'/></svg>";
+  const String filesIcon = "<svg viewBox='0 0 24 24' aria-hidden='true'><path d='M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z'/></svg>";
   const String settingsIcon = "<svg viewBox='0 0 24 24' aria-hidden='true'><circle cx='12' cy='12' r='3'/><path d='M19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1A8 8 0 0 0 15 6l-.4-2.6h-4L10 6a8 8 0 0 0-1.5 1L6 6 4 9.4 6.1 11a7 7 0 0 0 0 2L4 14.6 6 18l2.5-1a8 8 0 0 0 1.5 1l.5 2.6h4L15 18a8 8 0 0 0 1.5-1l2.5 1 2-3.4-2.1-1.6a7 7 0 0 0 .1-1Z'/></svg>";
   return "<nav class='nav'><div class='brand'><svg viewBox='0 0 24 22' aria-hidden='true'><path d='M3 9v4' style='stroke:var(--s1)'/><path d='M7.5 5v12' style='stroke:var(--s2)'/><path d='M12 8v6' style='stroke:var(--s3)'/><path d='M16.5 3v16' style='stroke:var(--s4)'/><path d='M21 9v4' style='stroke:var(--s5)'/></svg>Oracle</div><div class='navlinks'>" +
          link("today", "/", homeIcon, "Heute", "Today") +
          link("memories", "/#memories", memoriesIcon, "Gedanken", "Memories") +
          link("tasks", "/tasks", tasksIcon, "Aufgaben", "Tasks") +
          link("calendar", "/calendar", calendarIcon, "Kalender", "Calendar") +
+         link("files", "/files", filesIcon, "Dateien", "Files") +
          link("settings", "/settings", settingsIcon, "Setup", "Setup") + "</div></nav>";
 }
 
@@ -1726,7 +1743,7 @@ static void handlePortalRoot() {
   const bool de = oracleUiLanguage() == "de";
   BrainStats brainStats = readBrainStats();
   const BatteryReading battery = readBattery();
-  constexpr int kPageSize = 20;
+  constexpr int kPageSize = 12;   // fewer cards = fewer SD reads per page
   const int pageCount = max(1, (static_cast<int>(noteIndex.size()) + kPageSize - 1) / kPageSize);
   const int requestedPage = transferServer.hasArg("page") ? transferServer.arg("page").toInt() : 1;
   const int page = constrain(requestedPage, 1, pageCount);
@@ -1886,8 +1903,11 @@ static void handlePortalRoot() {
       } else {
         html += "<p class='text'>" + htmlEscape(transcript) + "</p>";
       }
-      if (SD_MMC.exists(wavPath)) {
-        html += "<audio id='audio-" + String(num) + "' controls preload='metadata' src='/audio?num=" + String(num) + "'></audio>";
+      const bool hasWav = SD_MMC.exists(wavPath);
+      if (hasWav) {
+        // preload='none': the browser must not pull every recording when the
+        // page opens (the device serves one request at a time).
+        html += "<audio id='audio-" + String(num) + "' controls preload='none' src='/audio?num=" + String(num) + "'></audio>";
         if (!moments.empty()) {
           html += "<div class='eyebrow'>" + String(viewerText("Momente", "Moments")) + "</div><div class='moments'>";
           for (size_t m = 0; m < moments.size(); m++) {
@@ -1899,7 +1919,7 @@ static void handlePortalRoot() {
       }
       html += "<div class='actions'>";
       html += "<a class='btn primary' href='/txt?num=" + String(num) + "'>" + String(viewerText("TXT herunterladen", "Download TXT")) + "</a>";
-      if (SD_MMC.exists(wavPath))
+      if (hasWav)
         html += "<a class='btn' href='/wav?num=" + String(num) + "'>" + String(viewerText("WAV herunterladen", "Download WAV")) + "</a>";
       html += "<form method='post' action='/note/delete' style='margin-left:auto' data-confirm='" +
               htmlEscape(viewerText("Diesen Gedanken vergessen? Das kann nicht rückgängig gemacht werden.", "Forget this memory? This cannot be undone.")) +
@@ -2378,6 +2398,267 @@ void handleSettingsPage() {
   transferServer.send(200, "text/html", html);
 }
 
+// ─── Files (Web Companion): browse, download and delete SD card files ───────
+// Files that belong to a memory (note_012.wav, note_012.txt, ...) are deleted
+// as the whole memory, so the catalog never points at missing files. The
+// catalog and index files themselves cannot be deleted here.
+#include "speech_detect.h"
+
+static bool filesPathOk(const String& path) {
+  return path.length() > 0 && path.length() < 200 && path[0] == '/' && path.indexOf("..") < 0;
+}
+
+static bool filesProtected(const String& path) {
+  return path == INDEX_FILE || path == "/notes/index.tmp" || path == "/notes/index.bak" ||
+         path == NOTES_DIR "/tasks.state" || path.startsWith(NOTES_DIR "/brain.search") ||
+         path.startsWith(NOTES_DIR "/brain.vectors") || path == NOTES_DIR "/.tz_sgt";
+}
+
+// note_012.anything -> 12, otherwise 0.
+static int filesNoteNumber(const String& path) {
+  const int slash = path.lastIndexOf('/');
+  const String name = path.substring(slash + 1);
+  if (!path.startsWith(NOTES_DIR "/") || !name.startsWith("note_") || name.length() < 9) return 0;
+  int n = 0, i = 5;
+  for (; i < (int)name.length() && isDigit(name[i]); i++) n = n * 10 + (name[i] - '0');
+  return (i > 5 && i < (int)name.length() && name[i] == '.') ? n : 0;
+}
+
+static String filesSize(uint64_t bytes) {
+  if (bytes < 1024) return String((unsigned)bytes) + " B";
+  if (bytes < 1024ULL * 1024ULL) return String(bytes / 1024.0, 1) + " KB";
+  return String(bytes / (1024.0 * 1024.0), 1) + " MB";
+}
+
+static String filesPageStart(const char* title) {
+  return String("<!doctype html><html><head><meta charset='utf-8'>"
+                "<meta name='viewport' content='width=device-width,initial-scale=1'><title>") + title + "</title>" +
+         portalCss() + "<style>.ftable{width:100%;border-collapse:collapse;font-size:14px}"
+         ".ftable td,.ftable th{padding:9px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}"
+         ".ftable th{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}"
+         ".ftable td.n{word-break:break-all}.ftable .r{text-align:right;white-space:nowrap}"
+         ".crumb a{color:inherit}.fbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 14px}</style>"
+         "</head><body><div class='wrap'>" + portalNav("files");
+}
+
+static void handleFilesPage() {
+  String dir = transferServer.hasArg("dir") ? transferServer.arg("dir") : String(NOTES_DIR);
+  if (!filesPathOk(dir)) dir = "/";
+  if (dir.length() > 1 && dir.endsWith("/")) dir.remove(dir.length() - 1);
+  File root = SD_MMC.open(dir.c_str());
+  if (!root || !root.isDirectory()) { transferServer.send(404, "text/plain", "Folder not found"); return; }
+
+  struct Entry { String name; bool folder; uint64_t size; time_t modified; };
+  std::vector<Entry> entries;
+  for (File f = root.openNextFile(); f && entries.size() < 2000; f = root.openNextFile()) {
+    String name = f.name();
+    const int slash = name.lastIndexOf('/');
+    if (slash >= 0) name = name.substring(slash + 1);
+    entries.push_back({name, f.isDirectory(), f.isDirectory() ? 0 : (uint64_t)f.size(), f.getLastWrite()});
+    f.close();
+  }
+  root.close();
+  // Folders first, then newest names first (note_120 before note_119).
+  std::sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) {
+    if (a.folder != b.folder) return a.folder;
+    return a.name > b.name;
+  });
+
+  constexpr int kPerPage = 150;
+  const int pages = max(1, ((int)entries.size() + kPerPage - 1) / kPerPage);
+  const int page = constrain(transferServer.hasArg("page") ? transferServer.arg("page").toInt() : 1, 1, pages);
+  uint64_t total = 0;
+  for (const Entry& e : entries) total += e.size;
+
+  String html = filesPageStart("Oracle Files");
+  html.reserve(24000);
+  html += "<div class='top'><div><div class='sub'>SD CARD</div><h1>" + String(viewerText("Dateien.", "Files.")) + "</h1></div>"
+          "<div class='pill'>" + filesSize(SD_MMC.usedBytes()) + " / " + filesSize(SD_MMC.totalBytes()) + "</div></div>";
+  html += "<div class='fbar'><span class='crumb'><a href='/files?dir=/'>SD</a>";
+  {
+    String acc;
+    int from = 1;
+    while (from < (int)dir.length()) {
+      int next = dir.indexOf('/', from);
+      if (next < 0) next = dir.length();
+      acc += "/" + dir.substring(from, next);
+      html += " / <a href='/files?dir=" + htmlEscape(acc) + "'>" + htmlEscape(dir.substring(from, next)) + "</a>";
+      from = next + 1;
+    }
+  }
+  html += "</span><span class='pill'>" + String(entries.size()) + " " + String(viewerText("Einträge", "items")) + " · " +
+          filesSize(total) + "</span><a class='btn' href='/files/silent'>" +
+          String(viewerText("Aufnahmen ohne Sprache finden", "Find recordings with no speech")) + "</a></div>";
+  if (transferServer.hasArg("deleted"))
+    html += "<div class='status'><span class='pill ok'>" + htmlEscape(transferServer.arg("deleted")) + " " +
+            String(viewerText("gelöscht", "deleted")) + "</span></div>";
+
+  html += "<form class='card' method='post' action='/files/delete' onsubmit=\"return confirm('" +
+          String(viewerText("Ausgewählte Dateien löschen? Dateien eines Gedankens löschen den ganzen Gedanken.",
+                            "Delete the selected files? A memory's file deletes the whole memory.")) + "')\">"
+          "<input type='hidden' name='dir' value='" + htmlEscape(dir) + "'>"
+          "<table class='ftable'><tr><th><input type='checkbox' onclick=\"document.querySelectorAll('.fsel').forEach(c=>c.checked=this.checked)\"></th>"
+          "<th>" + String(viewerText("Name", "Name")) + "</th><th class='r'>" + String(viewerText("Größe", "Size")) +
+          "</th><th class='r'>" + String(viewerText("Geändert", "Modified")) + "</th><th></th></tr>";
+  if (dir != "/") {
+    const int up = dir.lastIndexOf('/');
+    html += "<tr><td></td><td class='n'><a href='/files?dir=" + htmlEscape(up > 0 ? dir.substring(0, up) : String("/")) +
+            "'>..</a></td><td></td><td></td><td></td></tr>";
+  }
+  const int first = (page - 1) * kPerPage, last = min((int)entries.size(), first + kPerPage);
+  for (int i = first; i < last; i++) {
+    const Entry& e = entries[i];
+    const String path = (dir == "/" ? String("") : dir) + "/" + e.name;
+    html += "<tr><td>";
+    if (!e.folder && !filesProtected(path))
+      html += "<input class='fsel' type='checkbox' name='path' value='" + htmlEscape(path) + "'>";
+    html += "</td><td class='n'>";
+    if (e.folder) html += "<a href='/files?dir=" + htmlEscape(path) + "'>" + htmlEscape(e.name) + "/</a>";
+    else {
+      html += htmlEscape(e.name);
+      const int num = filesNoteNumber(path);
+      if (num > 0) html += " <span class='topic'>#" + String(num) + "</span>";
+    }
+    html += "</td><td class='r'>" + String(e.folder ? "" : filesSize(e.size)) + "</td><td class='r'>";
+    if (e.modified > 1600000000) html += "<span data-epoch='" + String((unsigned long)e.modified) + "'></span>";
+    html += "</td><td class='r'>";
+    if (!e.folder) html += "<a class='btn' href='/files/get?path=" + htmlEscape(path) + "'>" +
+                           String(viewerText("Laden", "Download")) + "</a>";
+    html += "</td></tr>";
+  }
+  html += "</table><div class='actions'><button type='submit' class='btn destructive'>" +
+          String(viewerText("Auswahl löschen", "Delete selected")) + "</button>";
+  if (pages > 1) {
+    if (page > 1) html += "<a class='btn' href='/files?dir=" + htmlEscape(dir) + "&page=" + String(page - 1) + "'>‹</a>";
+    html += "<span class='pill'>" + String(page) + " / " + String(pages) + "</span>";
+    if (page < pages) html += "<a class='btn' href='/files?dir=" + htmlEscape(dir) + "&page=" + String(page + 1) + "'>›</a>";
+  }
+  html += "</div></form><script>document.querySelectorAll('[data-epoch]').forEach(function(el){"
+          "var d=new Date(el.dataset.epoch*1000);el.textContent=d.toLocaleString([],{year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});});"
+          "</script></div></body></html>";
+  transferServer.send(200, "text/html", html);
+}
+
+static void handleFilesGet() {
+  const String path = transferServer.arg("path");
+  if (!filesPathOk(path)) { transferServer.send(400, "text/plain", "Invalid path"); return; }
+  File f = sdOpenRead(path.c_str());
+  if (!f || f.isDirectory()) { transferServer.send(404, "text/plain", "File not found"); return; }
+  const String name = path.substring(path.lastIndexOf('/') + 1);
+  const String mime = name.endsWith(".wav") ? "audio/wav" : name.endsWith(".json") ? "application/json"
+                    : (name.endsWith(".txt") || name.endsWith(".csv")) ? "text/plain" : "application/octet-stream";
+  if (!transferServer.hasArg("inline"))
+    transferServer.sendHeader("Content-Disposition", "attachment; filename=\"" + name + "\"");
+  transferServer.streamFile(f, mime);
+  f.close();
+}
+
+// Deletes the given paths; files of a memory delete the whole memory once.
+static int filesDelete(const std::vector<String>& paths) {
+  int deleted = 0;
+  std::vector<int> notes;
+  for (const String& path : paths) {
+    if (!filesPathOk(path) || filesProtected(path)) continue;
+    const int num = filesNoteNumber(path);
+    if (num > 0) {
+      if (std::find(notes.begin(), notes.end(), num) == notes.end()) notes.push_back(num);
+      continue;
+    }
+    File f = SD_MMC.open(path.c_str());
+    const bool isFile = f && !f.isDirectory();
+    if (f) f.close();
+    if (isFile && sdRemoveIfExists(path.c_str())) { storageChanged(); deleted++; }
+  }
+  for (int num : notes) if (deleteNote(num)) deleted++;
+  return deleted;
+}
+
+static void handleFilesDelete() {
+  std::vector<String> paths;
+  for (int i = 0; i < transferServer.args(); i++)
+    if (transferServer.argName(i) == "path") paths.push_back(transferServer.arg(i));
+  const int deleted = filesDelete(paths);
+  if (transferServer.arg("return") == "silent") {
+    transferServer.sendHeader("Location", "/files/silent?deleted=" + String(deleted));
+    transferServer.send(303);
+    return;
+  }
+  String dir = transferServer.hasArg("dir") ? transferServer.arg("dir") : String(NOTES_DIR);
+  if (!filesPathOk(dir)) dir = "/";
+  transferServer.sendHeader("Location", "/files?dir=" + dir + "&deleted=" + String(deleted));
+  transferServer.send(303);
+}
+
+// Recordings that hold only background noise: the transcript came back empty,
+// or the audio has no speech in it. Meetings are left alone.
+static void handleFilesSilent() {
+  const uint32_t started = millis();
+  const int from = max(0, transferServer.hasArg("from") ? (int)transferServer.arg("from").toInt() : 0);
+  struct Hit { int num; String reason; uint32_t seconds; };
+  std::vector<Hit> hits;
+  int checked = 0, index = from;
+  std::vector<int16_t> buf(2048);
+  for (; index < (int)noteIndex.size(); index++) {
+    if (millis() - started > 7000UL) break;   // keep each page quick; continue below
+    const NoteEntry& note = noteIndex[noteIndex.size() - 1 - index];
+    char path[64];
+    snprintf(path, sizeof(path), "%s/note_%03d.om", NOTES_DIR, note.num);
+    if (SD_MMC.exists(path)) continue;   // meeting
+    snprintf(path, sizeof(path), "%s/note_%03d.wav", NOTES_DIR, note.num);
+    File wav = sdOpenRead(path);
+    if (!wav) continue;
+    checked++;
+    const uint32_t seconds = wav.size() > 44 ? (wav.size() - 44) / (SAMPLE_RATE * 2) : 0;
+    char txt[64];
+    snprintf(txt, sizeof(txt), "%s/note_%03d.txt", NOTES_DIR, note.num);
+    String transcript = readSmallFile(txt, 200);
+    transcript.trim();
+    if (note.hasText && !transcript.length()) {
+      wav.close();
+      hits.push_back({note.num, viewerText("leeres Transkript", "empty transcript"), seconds});
+      continue;
+    }
+    if (note.hasText) { wav.close(); continue; }   // has words: keep
+    SpeechDetector speech;
+    wav.seek(44);
+    while (!speech.heardSpeech()) {
+      const int got = wav.read(reinterpret_cast<uint8_t*>(buf.data()), buf.size() * 2);
+      if (got <= 0) break;
+      speech.feed(buf.data(), got / 2);
+    }
+    wav.close();
+    if (!speech.heardSpeech()) hits.push_back({note.num, viewerText("keine Sprache erkannt", "no speech heard"), seconds});
+  }
+  const bool more = index < (int)noteIndex.size();
+
+  String html = filesPageStart("Oracle Files");
+  html += "<div class='top'><div><div class='sub'>" + String(viewerText("AUFRÄUMEN", "CLEAN UP")) + "</div><h1>" +
+          String(viewerText("Ohne Sprache.", "No speech.")) + "</h1></div></div>";
+  if (transferServer.hasArg("deleted"))
+    html += "<div class='status'><span class='pill ok'>" + htmlEscape(transferServer.arg("deleted")) + " " +
+            String(viewerText("Gedanken gelöscht", "memories deleted")) + "</span></div>";
+  html += "<p class='text'>" + String(viewerText("Geprüft: ", "Checked: ")) + String(from + (index - from)) + " / " +
+          String(noteIndex.size()) + String(viewerText(" Gedanken (Besprechungen ausgenommen). Hör kurz rein, dann löschen.",
+                                                      " memories (meetings skipped). Have a quick listen, then delete.")) + "</p>";
+  html += "<form class='card' method='post' action='/files/delete'><input type='hidden' name='dir' value='" NOTES_DIR "'>"
+          "<input type='hidden' name='return' value='silent'><table class='ftable'>";
+  if (hits.empty()) html += "<tr><td>" + String(viewerText("Keine gefunden.", "None found here.")) + "</td></tr>";
+  for (const Hit& hit : hits) {
+    char wavName[64];
+    snprintf(wavName, sizeof(wavName), "%s/note_%03d.wav", NOTES_DIR, hit.num);
+    html += "<tr><td><input class='fsel' type='checkbox' checked name='path' value='" + String(wavName) + "'></td>"
+            "<td>#" + String(hit.num) + "</td><td>" + htmlEscape(hit.reason) + "</td><td class='r'>" + String(hit.seconds) +
+            " s</td><td style='min-width:220px'><audio controls preload='none' src='/audio?num=" + String(hit.num) + "'></audio></td></tr>";
+  }
+  html += "</table><div class='actions'>";
+  if (!hits.empty()) html += "<button type='submit' class='btn destructive'>" +
+                             String(viewerText("Ausgewählte Gedanken löschen", "Delete selected memories")) + "</button>";
+  if (more) html += "<a class='btn' href='/files/silent?from=" + String(index) + "'>" +
+                    String(viewerText("Weiter prüfen", "Check more")) + "</a>";
+  html += "<a class='btn' href='/files'>" + String(viewerText("Zu den Dateien", "Back to files")) + "</a></div></form></div></body></html>";
+  transferServer.send(200, "text/html", html);
+}
+
 // ─── Firmware update over Wi-Fi (Web Companion) ─────────────────────────────
 // The companion hotspot is WPA2-protected, so only someone with the device
 // password can reach this. The upload is also checked to be an Oracle Lite
@@ -2669,6 +2950,11 @@ void setupTransferServer() {
   transferServer.on("/settings/wifi/scan", HTTP_GET, handleWifiScan);
   transferServer.on("/settings/key/clear", HTTP_POST, handleKeyClear);
   transferServer.on("/firmware", HTTP_POST, handleFirmwareUploadDone, handleFirmwareUploadChunk);
+  transferServer.on("/style.css", HTTP_GET, handlePortalStyle);
+  transferServer.on("/files", HTTP_GET, handleFilesPage);
+  transferServer.on("/files/get", HTTP_GET, handleFilesGet);
+  transferServer.on("/files/delete", HTTP_POST, handleFilesDelete);
+  transferServer.on("/files/silent", HTTP_GET, handleFilesSilent);
   transferServer.on("/api/notes", HTTP_GET, handlePortalJson);
   transferServer.on("/export.txt", HTTP_GET, handleExportTxt);
   transferServer.on("/txt",   HTTP_GET, [](){ sendFileByNum("txt", "text/plain", true); });

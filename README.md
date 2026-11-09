@@ -62,6 +62,17 @@ itself from sleep for it and goes back to sleep afterwards. A meeting started
 below 25 % battery asks first (top = record anyway, bottom = cancel) and a
 meeting stops and saves itself at 3 %.
 
+### Files in the Web Companion
+
+Web Companion → Files lists the SD card: download any file, or tick files and
+delete them (a memory's file deletes the whole memory, so nothing is left
+half-removed; the catalog and index files are protected). "Find recordings
+with no speech" checks your memories (not meetings) for empty transcripts or
+audio without speech, lets you listen, and deletes the ones you tick.
+
+New memories that contain only background noise are not saved at all
+("NO VOICE / NOT SAVED").
+
 ### Firmware update over Wi-Fi
 
 Run `pio run -t ota`. It builds `ota/oracle-lite-<version>.bin` and raises the

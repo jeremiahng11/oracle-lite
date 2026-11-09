@@ -14,6 +14,7 @@
 #include "../../sounds.h"
 #include "minutes.h"
 #include "battery.h"
+#include "speech_detect.h"
 #include <atomic>
 #include <algorithm>
 #include <cmath>
@@ -103,6 +104,11 @@ static bool writeWavHeader(File& file, uint32_t dataBytes) {
   return ok && restored;
 }
 
+static bool lastHadSpeech = true;
+static int lastSpeechMs = 0;
+bool lastRecordingHadSpeech() { return lastHadSpeech; }
+int lastRecordingSpeechMs() { return lastSpeechMs; }
+
 static bool recordHeldToPath(const char* path, int holdPin, bool captureMoments, int noteNum) {
   Serial.printf("[Rec] %s\n", path);
 
@@ -137,6 +143,7 @@ static bool recordHeldToPath(const char* path, int holdPin, bool captureMoments,
   std::vector<uint32_t> momentsMs;
   bool markReady = digitalRead(BTN_PWR) == HIGH;
   bool audioOk = true;
+  SpeechDetector speech;
 
   while (digitalRead(holdPin)==LOW || millis()-t0 < 500) {
     if (audio_playback_read((void*)sbuf, REC_BUF) != 0) {
@@ -146,6 +153,7 @@ static bool recordHeldToPath(const char* path, int holdPin, bool captureMoments,
     }
     int mono = REC_BUF/4;
     for (int i=0;i<mono;i++) mbuf[i] = sbuf[i*2];
+    speech.feed(mbuf, mono);
     size_t written = f.write((uint8_t*)mbuf, mono*2);
     if (written != (size_t)(mono * 2)) {
       audioOk = false;
@@ -195,8 +203,10 @@ static bool recordHeldToPath(const char* path, int holdPin, bool captureMoments,
     Serial.println("[Rec] warning: moments were not saved");
   }
 
-  Serial.printf("[Rec] done: %lu bytes, %u moments\n",
-                (unsigned long)totalMono, (unsigned)momentsMs.size());
+  lastHadSpeech = speech.heardSpeech();
+  lastSpeechMs = speech.speechMs();
+  Serial.printf("[Rec] done: %lu bytes, %u moments, speech %d ms (noise %d)\n",
+                (unsigned long)totalMono, (unsigned)momentsMs.size(), lastSpeechMs, speech.noiseLevel());
   return audioOk && headerOk && totalMono > 1000;
 }
 

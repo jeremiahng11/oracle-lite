@@ -38,6 +38,7 @@ SET_LOOP_TASK_STACK_SIZE(16 * 1024);
 #include "src/app/sleep.h"
 #include "src/app/tasks.h"
 #include "src/app/reminders.h"
+#include "src/app/sd_read.h"
 #include "src/app/ui.h"
 
 board_power_bsp_t board(EPD_PWR_PIN, Audio_PWR_PIN, VBAT_PWR_PIN);
@@ -876,6 +877,7 @@ void enterCompanion() {
       returnToReady();
       return;
     }
+    WiFi.setSleep(false);   // no radio power saving while the Companion is open
   } else {
     syncTimeFromNTP(5000);
   }
@@ -983,6 +985,20 @@ void captureMemory() {
   if (!recorded) {
     showError("RECORD AGAIN");
     delay(1300);
+    returnToReady();
+    return;
+  }
+
+  // Only background noise: don't keep it.
+  if (!lastRecordingHadSpeech()) {
+    char path[64];
+    for (const char* ext : {"wav", "moments"}) {
+      snprintf(path, sizeof(path), "%s/note_%03d.%s", NOTES_DIR, lastRecNum, ext);
+      sdRemoveIfExists(path);
+    }
+    Serial.printf("[Rec] no speech in note %d; not saved\n", lastRecNum);
+    showAskProgress("NO VOICE", "NOT SAVED");
+    delay(1500);
     returnToReady();
     return;
   }
