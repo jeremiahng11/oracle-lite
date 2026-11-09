@@ -38,6 +38,7 @@ SET_LOOP_TASK_STACK_SIZE(16 * 1024);
 #include "src/app/sleep.h"
 #include "src/app/tasks.h"
 #include "src/app/reminders.h"
+#include <ESPmDNS.h>
 #include "src/app/sd_read.h"
 #include "src/app/ui.h"
 
@@ -888,6 +889,12 @@ void enterCompanion() {
   setupTransferServer();
   transferServer.begin();
   transferServerActive = true;
+  // http://oracle.local works on the same network (and on the hotspot).
+  if (MDNS.begin("oracle")) {
+    MDNS.setInstanceName("Oracle Lite");
+    MDNS.addService("http", "tcp", 80);
+    Serial.println("[Companion] http://oracle.local");
+  }
   const IPAddress ip = joinedSavedNetwork ? WiFi.localIP() : WiFi.softAPIP();
   transferUrl = ip.toString();
   companionApPassword = joinedSavedNetwork ? "" : accessPointPassword;
@@ -897,6 +904,7 @@ void enterCompanion() {
 
 void leaveCompanion() {
   soundBack();
+  MDNS.end();
   stopTransferMode();
   // Join saved networks again right away (including one just added in the
   // companion), in the background; the Home icon follows the result.

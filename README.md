@@ -62,6 +62,11 @@ itself from sleep for it and goes back to sleep afterwards. A meeting started
 below 25 % battery asks first (top = record anyway, bottom = cancel) and a
 meeting stops and saves itself at 3 %.
 
+### Address
+
+While the Web Companion is open, Oracle answers at http://oracle.local (as
+well as its IP address) on your Wi-Fi or on its own hotspot.
+
 ### Hotspot password
 
 Setup → Hotspot: "New each time" (default) makes a random `Ora-XXXXXXXX`

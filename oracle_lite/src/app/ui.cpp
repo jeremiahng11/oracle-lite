@@ -715,7 +715,8 @@ void showTransferMode(const char* ip, const char* apPassword) {
     labelLeft(kContentTop, "OPEN IN BROWSER", 1, BLACK);
     fillRect(kInset, 70, kContentWidth, 52, BLACK);
     drawStrInBox(kInset, 70, kContentWidth, 52, ip, 2, WHITE);
-    labelLeft(140, "SAME WI-FI", 1, BLACK);
+    labelLeft(132, "OR  oracle.local", 1, BLACK);
+    labelLeft(150, "SAME WI-FI", 1, BLACK);
     drawFooter("COMPANION", "READY", BLACK);
   }
   refresh();
