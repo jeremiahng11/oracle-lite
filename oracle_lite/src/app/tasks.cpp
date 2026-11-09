@@ -20,8 +20,8 @@ std::vector<TaskState> loadStates() {
   std::vector<TaskState> states;
   // Recover the last committed state if power failed between FAT renames.
   const String backup = String(kTaskStateFile) + ".bak";
-  if (!SD_MMC.exists(kTaskStateFile) && SD_MMC.exists(backup.c_str()))
-    SD_MMC.rename(backup.c_str(), kTaskStateFile);
+  if (!sdExists(kTaskStateFile) && sdExists(backup.c_str()))
+    sdRename(backup.c_str(), kTaskStateFile);
   File file = sdOpenRead(kTaskStateFile);
   if (!file) return states;
   while (file.available()) {
@@ -192,7 +192,7 @@ bool setBrainTaskDone(const String& id, bool done) {
   if (!found) states.push_back({id, done, currentUtcIso(), normalizedText});
   const String temp = String(kTaskStateFile) + ".tmp";
   sdRemoveIfExists(temp.c_str());
-  File file = SD_MMC.open(temp.c_str(), FILE_WRITE);
+  File file = sdCreate(temp.c_str());
   if (!file) return false;
   size_t expected = 0;
   bool complete = true;
@@ -204,7 +204,7 @@ bool setBrainTaskDone(const String& id, bool done) {
   file.flush();
   complete &= file.size() == expected;
   file.close();
-  return complete && commitStoredFile(SD_MMC, String(kTaskStateFile), temp);
+  return complete && commitStoredFile(sdFs, String(kTaskStateFile), temp);
 }
 
 int openBrainTaskCount() {

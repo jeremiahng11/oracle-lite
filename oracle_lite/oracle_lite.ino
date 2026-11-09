@@ -39,6 +39,7 @@ SET_LOOP_TASK_STACK_SIZE(16 * 1024);
 #include "src/app/reminders.h"
 #include <ESPmDNS.h>
 #include "src/app/sd_read.h"
+#include "src/app/psram_json.h"
 #include "src/app/ui.h"
 
 board_power_bsp_t board(EPD_PWR_PIN, Audio_PWR_PIN, VBAT_PWR_PIN);
@@ -126,7 +127,7 @@ bool importFlashSetup() {
     return false;
   }
 
-  JsonDocument doc;
+  JsonDocument doc(psramJson());
   if (deserializeJson(doc, bytes.data(), bytes.size())) {
     std::fill(bytes.begin(), bytes.end(), 0);
     esp_partition_erase_range(partition, 0, partition->size);
@@ -173,7 +174,7 @@ void applyUsbSetupLine(const String& line) {
   if (!line.startsWith("ORACLE_SETUP_V1 ")) return;
   if (line.length() > 700) { replyUsbSetup("ERROR", "TOO_LONG"); return; }
 
-  JsonDocument doc;
+  JsonDocument doc(psramJson());
   if (deserializeJson(doc, line.substring(strlen("ORACLE_SETUP_V1 ")))) {
     replyUsbSetup("ERROR", "INVALID_JSON");
     return;
@@ -1832,11 +1833,20 @@ void initializeDisplay() {
 
 void initializeStorage(bool recoverOrphans) {
   SD_MMC.setPins(SD_CLK, SD_CMD, SD_D0);
-  if (!SD_MMC.begin("/sdcard", true)) {
+  // 40 MHz high-speed bus doubles card throughput; cards or wiring that
+  // can't do it fall back to the standard 20 MHz.
+  bool mounted = SD_MMC.begin("/sdcard", true, false, SDMMC_FREQ_HIGHSPEED, 8);
+  if (!mounted) {
+    Serial.println("[SD] 40 MHz mount failed; using 20 MHz");
+    SD_MMC.end();
+    mounted = SD_MMC.begin("/sdcard", true, false, SDMMC_FREQ_DEFAULT, 8);
+  }
+  if (!mounted) {
     showError("SD ERROR");
     while (true) delay(1000);
   }
-  if (!SD_MMC.exists(NOTES_DIR)) SD_MMC.mkdir(NOTES_DIR);
+  sdCacheReset();
+  if (!sdExists(NOTES_DIR)) SD_MMC.mkdir(NOTES_DIR);
   // Only boot performs the comparatively expensive orphan-WAV recovery scan.
   // Normal reloads read the compact catalog, while search/vector indexes are
   // rebuilt lazily by the first operation that actually needs them.

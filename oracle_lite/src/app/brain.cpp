@@ -1,4 +1,5 @@
 #include "brain.h"
+#include "psram_json.h"
 #include "sd_read.h"
 #include "minutes.h"
 
@@ -279,12 +280,12 @@ String relevantExcerpt(int noteNum, const std::vector<String>& terms) {
 }
 
 bool replaceAtomically(const String& path, const String& temp) {
-  return commitStoredFile(SD_MMC, path, temp);
+  return commitStoredFile(sdFs, path, temp);
 }
 
 std::vector<float> loadEmbedding(int noteNum) {
   std::vector<float> values;
-  recoverStoredFile(SD_MMC, embeddingPath(noteNum));
+  recoverStoredFile(sdFs, embeddingPath(noteNum));
   File file = sdOpenRead(embeddingPath(noteNum));
   if (!file) return values;
   uint16_t dimensions = 0;
@@ -331,7 +332,7 @@ bool rewriteSearchIndex(int replacementNum, const String* replacement) {
   if (!ensureBrainSearchIndex()) return false;
   const String temp = String(kSearchIndexPath) + ".tmp";
   sdRemoveIfExists(temp.c_str());
-  File output = SD_MMC.open(temp.c_str(), FILE_WRITE);
+  File output = sdCreate(temp.c_str());
   if (!output) return false;
   size_t expected = 0;
   bool ok = true;
@@ -360,7 +361,7 @@ bool rewriteVectorIndex(int replacementNum, const std::vector<float>* replacemen
   if (!ensureBrainVectorIndex()) return false;
   const String temp = String(kVectorIndexPath) + ".tmp";
   sdRemoveIfExists(temp.c_str());
-  File output=SD_MMC.open(temp.c_str(),FILE_WRITE);
+  File output=sdCreate(temp.c_str());
   if(!output) return false;
   File input=sdOpenRead(kVectorIndexPath);
   if (!input) { output.close(); return false; }
@@ -448,7 +449,7 @@ bool saveBrainEmbedding(int noteNum, const std::vector<float>& embedding) {
   const String path = embeddingPath(noteNum);
   const String temp = path + ".tmp";
   sdRemoveIfExists(temp);
-  File file = SD_MMC.open(temp, FILE_WRITE);
+  File file = sdCreate(temp);
   if (!file) return false;
   const uint16_t dimensions = static_cast<uint16_t>(embedding.size());
   bool ok = file.write(reinterpret_cast<const uint8_t*>(&dimensions), sizeof(dimensions)) == sizeof(dimensions);
@@ -488,7 +489,7 @@ bool brainHasSemanticIndex() {
 }
 
 bool saveBrainMemoryJson(int noteNum, const String& json) {
-  JsonDocument doc;
+  JsonDocument doc(psramJson());
   if (deserializeJson(doc, json)) return false;
   // Do not overwrite a usable memory with a malformed or empty model result.
   if (!validMemoryBody(doc.as<JsonVariantConst>())) return false;
@@ -557,7 +558,7 @@ bool saveBrainMemoryJson(int noteNum, const String& json) {
   const String path = brainMemoryPath(noteNum);
   const String temp = path + ".tmp";
   sdRemoveIfExists(temp);
-  File file = SD_MMC.open(temp, FILE_WRITE);
+  File file = sdCreate(temp);
   if (!file) return false;
   const size_t expected = measureJson(doc);
   const size_t count = serializeJson(doc, file);
@@ -579,10 +580,10 @@ bool saveBrainMemoryJson(int noteNum, const String& json) {
 BrainMemory loadBrainMemory(int noteNum) {
   BrainMemory memory;
   memory.noteNum = noteNum;
-  recoverStoredFile(SD_MMC, brainMemoryPath(noteNum));
+  recoverStoredFile(sdFs, brainMemoryPath(noteNum));
   File file = sdOpenRead(brainMemoryPath(noteNum));
   if (!file) return memory;
-  JsonDocument doc;
+  JsonDocument doc(psramJson());
   const DeserializationError error = deserializeJson(doc, file);
   file.close();
   if (error) return memory;
@@ -615,11 +616,11 @@ bool brainMemoryIsCurrent(int noteNum) {
 }
 
 bool ensureBrainSearchIndex() {
-  recoverStoredFile(SD_MMC, String(kSearchIndexPath));
-  if (SD_MMC.exists(kSearchIndexPath)) return true;
+  recoverStoredFile(sdFs, String(kSearchIndexPath));
+  if (sdExists(kSearchIndexPath)) return true;
   const String temp = String(kSearchIndexPath) + ".tmp";
   sdRemoveIfExists(temp.c_str());
-  File output = SD_MMC.open(temp.c_str(), FILE_WRITE);
+  File output = sdCreate(temp.c_str());
   if (!output) return false;
   size_t expected = 0;
   bool ok = true;
@@ -635,11 +636,11 @@ bool ensureBrainSearchIndex() {
 }
 
 bool ensureBrainVectorIndex() {
-  recoverStoredFile(SD_MMC, String(kVectorIndexPath));
-  if(SD_MMC.exists(kVectorIndexPath)) return true;
+  recoverStoredFile(sdFs, String(kVectorIndexPath));
+  if(sdExists(kVectorIndexPath)) return true;
   const String temp=String(kVectorIndexPath)+".tmp";
   sdRemoveIfExists(temp.c_str());
-  File output=SD_MMC.open(temp.c_str(),FILE_WRITE);
+  File output=sdCreate(temp.c_str());
   if(!output) return false;
   const size_t bytes=kEmbeddingDimensions*sizeof(float);
   size_t expected = 0;
@@ -833,13 +834,13 @@ static String isoFromEpoch(long long epoch) {
 
 void migrateDueTimesToSingapore() {
   const char* marker = NOTES_DIR "/.tz_sgt";
-  if (SD_MMC.exists(marker)) return;
+  if (sdExists(marker)) return;
   int moved = 0, failed = 0;
   for (const NoteEntry& note : noteIndex) {
     const String path = brainMemoryPath(note.num);
     File in = sdOpenRead(path.c_str());
     if (!in) continue;
-    JsonDocument doc;
+    JsonDocument doc(psramJson());
     const bool parsed = !deserializeJson(doc, in);
     in.close();
     if (!parsed) continue;
@@ -859,7 +860,7 @@ void migrateDueTimesToSingapore() {
     if (!changed) continue;
     const String temp = path + ".tmp";
     sdRemoveIfExists(temp.c_str());
-    File out = SD_MMC.open(temp.c_str(), FILE_WRITE);
+    File out = sdCreate(temp.c_str());
     const size_t expected = measureJson(doc);
     const bool ok = out && serializeJson(doc, out) == expected;
     if (out) { out.flush(); out.close(); }
@@ -869,7 +870,7 @@ void migrateDueTimesToSingapore() {
     Serial.printf("[Time] moving due times to Singapore time: %d files failed, will retry\n", failed);
     return;
   }
-  File done = SD_MMC.open(marker, FILE_WRITE);
+  File done = sdCreate(marker);
   if (done) { done.print("Agenda times converted from German time to Singapore time\n"); done.close(); }
   storageChanged();
   Serial.printf("[Time] %d agenda times moved to Singapore time\n", moved);

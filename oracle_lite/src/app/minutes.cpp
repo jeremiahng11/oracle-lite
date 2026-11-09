@@ -1,4 +1,5 @@
 #include "minutes.h"
+#include "psram_json.h"
 #include "sd_read.h"
 #include "../../config.h"
 #include "../../globals.h"
@@ -65,7 +66,7 @@ bool writeSidecar(int num, const Fields& fields) {
   const String path = sidecarPath(num);
   const String temp = path + ".tmp";
   sdRemoveIfExists(temp.c_str());
-  File file = SD_MMC.open(temp.c_str(), FILE_WRITE);
+  File file = sdCreate(temp.c_str());
   if (!file) return false;
   bool ok = true;
   for (const auto& field : fields) {
@@ -75,7 +76,7 @@ bool writeSidecar(int num, const Fields& fields) {
   }
   file.flush();
   file.close();
-  return ok && commitStoredFile(SD_MMC, path, temp);
+  return ok && commitStoredFile(sdFs, path, temp);
 }
 
 bool setSidecarField(int num, const char* key, const String& value) {
@@ -189,7 +190,7 @@ long parseServerSize(const String& body) {
   text.trim();
   if (!text.length()) return -1;
   if (isdigit(static_cast<unsigned char>(text[0]))) return text.toInt();
-  JsonDocument doc;
+  JsonDocument doc(psramJson());
   if (deserializeJson(doc, text)) return -1;
   return sizeFromVariant(doc.as<JsonVariantConst>());
 }
@@ -271,7 +272,7 @@ String firstString(JsonVariantConst object, std::initializer_list<const char*> k
 // Every live reply carries "brief": the last line heard, who said it, who has talked.
 void takeBrief(const String& body) {
   if (body.indexOf("brief") < 0) return;
-  JsonDocument doc;
+  JsonDocument doc(psramJson());
   if (deserializeJson(doc, body)) return;
   JsonVariantConst brief = doc["brief"];
   String speaker, line, talked;
@@ -420,7 +421,7 @@ void liveTask(void*) {
 // ─── Minutes text ───────────────────────────────────────────────────────────
 bool jobReady(const String& body, String& minutesText, bool& failed) {
   failed = false;
-  JsonDocument doc;
+  JsonDocument doc(psramJson());
   if (deserializeJson(doc, body)) return false;
   JsonVariantConst root = doc.as<JsonVariantConst>();
   if (root["job"].is<JsonObjectConst>()) root = root["job"];
@@ -440,7 +441,7 @@ bool jobReady(const String& body, String& minutesText, bool& failed) {
 
 String answerFrom(const String& body, String& askId, bool& failed) {
   failed = false;
-  JsonDocument doc;
+  JsonDocument doc(psramJson());
   if (deserializeJson(doc, body)) return "";
   if (doc["id"].is<const char*>()) askId = doc["id"].as<const char*>();
   else if (doc["id"].is<long long>()) askId = String(static_cast<long>(doc["id"].as<long long>()));
@@ -454,7 +455,7 @@ String answerFrom(const String& body, String& askId, bool& failed) {
 }
 
 bool askForMinutes(Conn& conn, const String& rid, String& minutes, String& error) {
-  JsonDocument request;
+  JsonDocument request(psramJson());
   JsonObject message = request["messages"].to<JsonArray>().add<JsonObject>();
   message["role"] = "user";
   message["content"] =
@@ -489,12 +490,12 @@ bool storeMinutes(int num, const String& title, const String& minutes) {
   snprintf(path, sizeof(path), "%s/note_%03d.txt", NOTES_DIR, num);
   const String temp = String(path) + ".tmp";
   sdRemoveIfExists(temp.c_str());
-  File file = SD_MMC.open(temp.c_str(), FILE_WRITE);
+  File file = sdCreate(temp.c_str());
   if (!file) return false;
   const size_t written = file.print(text);
   file.flush();
   file.close();
-  if (written != text.length() || !commitStoredFile(SD_MMC, String(path), temp)) return false;
+  if (written != text.length() || !commitStoredFile(sdFs, String(path), temp)) return false;
   if (!updateIndexHasText(num)) return false;
   // The normal memory pipeline now organises the minutes (tasks, decisions).
   writeNoteQueueState(num, "queued");
@@ -509,7 +510,7 @@ bool completeUpload(Conn& conn, int num, Fields& fields, String& error) {
   const int status = call(conn, "POST", "/api/uploads/" + rid + "/complete" + query, nullptr,
                           nullptr, 0, nullptr, 0, -1, &body, 60000);
   if (status < 200 || status >= 300) { error = describe(status); return false; }
-  JsonDocument doc;
+  JsonDocument doc(psramJson());
   if (!deserializeJson(doc, body)) {
     for (const char* key : {"id", "job", "jid", "job_id"}) {
       if (doc[key].is<const char*>()) { fields["job"] = doc[key].as<const char*>(); break; }
@@ -631,7 +632,7 @@ bool minutesFinishUpload(int noteNum, const std::function<void(int)>& progress, 
 }
 
 bool minutesNoteAwaitingServer(int noteNum) {
-  if (!SD_MMC.exists(sidecarPath(noteNum).c_str())) return false;
+  if (!sdExists(sidecarPath(noteNum).c_str())) return false;
   Fields fields;
   if (!readSidecar(noteNum, fields)) return false;
   return fields["state"] != "done" && fields["state"] != "failed";
@@ -723,7 +724,7 @@ bool minutesServiceOne(const std::function<void(const char*)>& phase, String& er
 bool oracleServerTts(const String& text, const char* outputPath) {
   if (!oracleHasMinutesKey() || WiFi.status() != WL_CONNECTED) return false;
   const uint32_t startedAt = millis();
-  JsonDocument request;
+  JsonDocument request(psramJson());
   request["text"] = text;
   request["lang"] = oracleUiLanguage();
   String payload;
@@ -742,13 +743,13 @@ bool oracleServerTts(const String& text, const char* outputPath) {
   if (status == 200) {
     const String temp = String(outputPath) + ".tmp";
     sdRemoveIfExists(temp.c_str());
-    File file = SD_MMC.open(temp.c_str(), FILE_WRITE);
+    File file = sdCreate(temp.c_str());
     if (file) {
       const int written = http.writeToStream(&file);
       file.flush();
       const size_t stored = file.size();
       file.close();
-      ok = written > 44 && stored > 44 && commitStoredFile(SD_MMC, String(outputPath), temp);
+      ok = written > 44 && stored > 44 && commitStoredFile(sdFs, String(outputPath), temp);
       if (!ok) sdRemoveIfExists(temp.c_str());
     }
   } else {
@@ -875,7 +876,7 @@ String deviceLanguageName() {
 }
 
 String jsonText(const String& json, const char* key) {
-  JsonDocument doc;
+  JsonDocument doc(psramJson());
   if (deserializeJson(doc, json)) return "";
   return doc[key] | "";
 }
@@ -908,7 +909,7 @@ VoiceTarget voiceTarget() {
   target.host = host;
   target.prefix = prefix;
 
-  JsonDocument ask;
+  JsonDocument ask(psramJson());
   JsonArray messages = ask["messages"].to<JsonArray>();
   JsonObject system = messages.add<JsonObject>();
   system["role"] = "system";
@@ -1057,7 +1058,7 @@ int readVoiceReply(Client& client, uint32_t startedAt, uint32_t uploadedAt,
   };
   int lineCount = 0;
   auto anyText = [](const String& payload, std::initializer_list<const char*> keys) {
-    JsonDocument doc;
+    JsonDocument doc(psramJson());
     if (deserializeJson(doc, payload)) return String();
     if (doc.is<const char*>()) return String(doc.as<const char*>());
     for (const char* key : keys)
@@ -1321,7 +1322,7 @@ bool oracleTextAsk(const String& question, String& answer, String& error) {
   answer = ""; error = "";
   if (!oracleHasMinutesKey()) { error = "ADD MINUTES KEY"; return false; }
   if (WiFi.status() != WL_CONNECTED) { error = "NO WIFI"; return false; }
-  JsonDocument request;
+  JsonDocument request(psramJson());
   JsonArray messages = request["messages"].to<JsonArray>();
   JsonObject system = messages.add<JsonObject>();
   system["role"] = "system";
@@ -1358,7 +1359,7 @@ bool oracleServerTtsStream(const String& spoken, const String& display, int sour
   if (!oracleHasMinutesKey() || WiFi.status() != WL_CONNECTED) return false;
   const uint32_t startedAt = millis();
   const VoiceTarget target = voiceTarget();
-  JsonDocument request;
+  JsonDocument request(psramJson());
   request["text"] = spoken;
   request["lang"] = oracleUiLanguage();
   request["format"] = "adpcm";

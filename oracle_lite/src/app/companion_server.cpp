@@ -7,6 +7,7 @@
 // Companion is open the main loop does no background work, so handlers can
 // use the note catalog and SD card directly.
 #include <Arduino.h>
+#include "psram_json.h"
 #include <esp_http_server.h>
 #include <WiFi.h>
 #include <SD_MMC.h>
@@ -101,7 +102,7 @@ static esp_err_t sendJson(httpd_req_t* req, JsonDocument& doc, int status = 200)
 }
 
 static esp_err_t sendError(httpd_req_t* req, int status, const String& message) {
-  JsonDocument doc;
+  JsonDocument doc(psramJson());
   doc["ok"] = false;
   doc["error"] = message;
   return sendJson(req, doc, status);
@@ -162,7 +163,7 @@ COMPANION_GET(handleApp) {
 
 COMPANION_GET(handleBoot) {
   loadIndex();
-  JsonDocument doc;
+  JsonDocument doc(psramJson());
   doc["version"] = FIRMWARE_VERSION;
   doc["lang"] = oracleUiLanguage();
   doc["voice"] = oracleSpeechVoice();
@@ -186,6 +187,10 @@ COMPANION_GET(handleBoot) {
   doc["has"]["apPassword"] = oracleHasApPassword();
   doc["apFixed"] = oracleApPasswordFixed();
   doc["minutesUrl"] = oracleMinutesUrl();
+  // Memory health, for diagnosing (not shown in the app).
+  doc["mem"]["internalFree"] = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  doc["mem"]["internalLargest"] = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+  doc["mem"]["psramFree"] = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
   JsonArray profiles = doc["profiles"].to<JsonArray>();
   for (int i = 0; i < oracleWifiProfileCount(); i++) profiles.add(oracleWifiProfile(i).ssid);
   return sendJson(req, doc);
@@ -195,7 +200,7 @@ COMPANION_GET(handleBoot) {
 
 COMPANION_GET(handleAgenda) {
   loadIndex();
-  JsonDocument doc;
+  JsonDocument doc(psramJson());
   JsonArray items = doc["items"].to<JsonArray>();
   for (const BrainTaskRecord& task : loadBrainTasks()) {
     JsonObject item = items.add<JsonObject>();
@@ -211,7 +216,7 @@ COMPANION_GET(handleAgenda) {
 }
 
 COMPANION_POST(handleTaskStatus) {
-  JsonDocument body;
+  JsonDocument body(psramJson());
   if (!readJsonBody(req, body)) return sendError(req, 400, "Invalid request");
   const String id = body["id"] | "";
   if (!setBrainTaskDone(id, body["done"] | false)) return sendError(req, 400, "Unknown task");
@@ -239,7 +244,7 @@ static const char* cardJson(const NoteEntry& note) {
   if (it != cardCache.end()) return it->second;
   const int num = note.num;
   char path[64];
-  JsonDocument doc;
+  JsonDocument doc(psramJson());
   doc["num"] = num;
   doc["created"] = noteCreatedUtc(num);
   BrainMemory memory = loadBrainMemory(num);
@@ -267,7 +272,7 @@ static const char* cardJson(const NoteEntry& note) {
   doc["error"] = error.length() ? localizedQueueError(error) : String("");
   doc["retries"] = error.length() ? noteQueueRetries(num) : 0;
   snprintf(path, sizeof(path), "%s/note_%03d.om", NOTES_DIR, num);
-  doc["meeting"] = SD_MMC.exists(path);
+  doc["meeting"] = sdExists(path);
   snprintf(path, sizeof(path), "%s/note_%03d.wav", NOTES_DIR, num);
   File wav = sdOpenRead(path);
   doc["hasWav"] = (bool)wav;
@@ -317,7 +322,7 @@ COMPANION_GET(handleMemories) {
 }
 
 COMPANION_POST(handleMemoryDelete) {
-  JsonDocument body;
+  JsonDocument body(psramJson());
   if (!readJsonBody(req, body)) return sendError(req, 400, "Invalid request");
   const int num = body["num"] | 0;
   if (num <= 0) return sendError(req, 400, "Invalid memory");
@@ -327,7 +332,7 @@ COMPANION_POST(handleMemoryDelete) {
 }
 
 COMPANION_POST(handleDeleteAll) {
-  JsonDocument body;
+  JsonDocument body(psramJson());
   if (!readJsonBody(req, body)) return sendError(req, 400, "Invalid request");
   String confirmation = body["confirmation"] | "";
   confirmation.trim();
@@ -339,7 +344,7 @@ COMPANION_POST(handleDeleteAll) {
 }
 
 COMPANION_POST(handleAsk) {
-  JsonDocument body;
+  JsonDocument body(psramJson());
   if (!readJsonBody(req, body)) return sendError(req, 400, "Invalid request");
   String question = body["question"] | "";
   question.trim();
@@ -350,7 +355,7 @@ COMPANION_POST(handleAsk) {
     return sendError(req, 503, viewerText(
       "Oracle konnte nicht antworten. Verbinde das Gerät mit WLAN, hinterlege einen API-Key und synchronisiere zuerst mindestens einen verstandenen Gedanken.",
       "Oracle could not answer. Connect the device to Wi-Fi, add an API key, and sync at least one Smart Memory first."));
-  JsonDocument doc;
+  JsonDocument doc(psramJson());
   doc["ok"] = true;
   doc["answer"] = answer;
   JsonArray list = doc["sources"].to<JsonArray>();
@@ -388,7 +393,7 @@ COMPANION_GET(handleRecap) {
   }
   if (!recap.length() && included > 0) {
     if (WiFi.status() == WL_CONNECTED) {
-      JsonDocument request;
+      JsonDocument request(psramJson());
       request["model"] = "gpt-4o-mini";
       request["store"] = false;
       request["max_output_tokens"] = 500;
@@ -401,11 +406,11 @@ COMPANION_GET(handleRecap) {
     if (!recap.length()) recap = context;
     if (recap.length()) {
       sdRemoveIfExists(cachePath.c_str());
-      File file = SD_MMC.open(cachePath.c_str(), FILE_WRITE);
+      File file = sdCreate(cachePath.c_str());
       if (file) { file.println(cacheKey); file.print(recap); file.close(); }
     }
   }
-  JsonDocument doc;
+  JsonDocument doc(psramJson());
   doc["count"] = included;
   doc["text"] = recap;
   return sendJson(req, doc);
@@ -556,7 +561,7 @@ COMPANION_GET(handleFiles) {
   // Large folders: stream the JSON instead of building one big document.
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-  JsonDocument head;
+  JsonDocument head(psramJson());
   head["dir"] = dir;
   String start;
   serializeJson(head, start);
@@ -568,7 +573,7 @@ COMPANION_GET(handleFiles) {
   for (size_t i = 0; i < entries.size(); i++) {
     const Entry& e = entries[i];
     const String path = (dir == "/" ? String("") : dir) + "/" + e.name;
-    JsonDocument item;
+    JsonDocument item(psramJson());
     item["name"] = e.name;
     item["dir"] = e.folder;
     item["size"] = e.size;
@@ -594,7 +599,7 @@ COMPANION_GET(handleFileGet) {
 }
 
 COMPANION_POST(handleFilesDelete) {
-  JsonDocument body;
+  JsonDocument body(psramJson());
   if (!readJsonBody(req, body, 64 * 1024)) return sendError(req, 400, "Invalid request");
   int deleted = 0;
   std::vector<int> notes;
@@ -616,7 +621,7 @@ COMPANION_POST(handleFilesDelete) {
     cardCacheDrop(num);
     if (deleteNote(num)) deleted++;
   }
-  JsonDocument doc;
+  JsonDocument doc(psramJson());
   doc["ok"] = true;
   doc["deleted"] = deleted;
   return sendJson(req, doc);
@@ -628,7 +633,7 @@ COMPANION_GET(handleSilent) {
   const uint32_t started = millis();
   const int total = noteIndex.size();
   int index = std::max(0, (int)queryArg(req, "from").toInt());
-  JsonDocument doc;
+  JsonDocument doc(psramJson());
   JsonArray hits = doc["hits"].to<JsonArray>();
   std::vector<int16_t> buf(2048);
   for (; index < total; index++) {
@@ -636,7 +641,7 @@ COMPANION_GET(handleSilent) {
     const NoteEntry& note = noteIndex[total - 1 - index];
     char path[64];
     snprintf(path, sizeof(path), "%s/note_%03d.om", NOTES_DIR, note.num);
-    if (SD_MMC.exists(path)) continue;
+    if (sdExists(path)) continue;
     snprintf(path, sizeof(path), "%s/note_%03d.wav", NOTES_DIR, note.num);
     File wav = sdOpenRead(path);
     if (!wav) continue;
@@ -700,7 +705,7 @@ COMPANION_GET(handleWifiScan) {
       default: return "Secured";
     }
   };
-  JsonDocument doc;
+  JsonDocument doc(psramJson());
   JsonArray networks = doc["networks"].to<JsonArray>();
   for (const Seen& network : seen) {
     bool saved = false;
@@ -717,7 +722,7 @@ COMPANION_GET(handleWifiScan) {
 }
 
 COMPANION_POST(handleConnection) {
-  JsonDocument body;
+  JsonDocument body(psramJson());
   if (!readJsonBody(req, body)) return sendError(req, 400, "Invalid request");
   String ssid = body["ssid"] | "", password = body["password"] | "", apiKey = body["apiKey"] | "";
   ssid.trim();
@@ -734,7 +739,7 @@ COMPANION_POST(handleConnection) {
 }
 
 COMPANION_POST(handleWifiUpdate) {
-  JsonDocument body;
+  JsonDocument body(psramJson());
   if (!readJsonBody(req, body)) return sendError(req, 400, "Invalid request");
   String ssid = body["ssid"] | "", newSsid = body["newSsid"] | "";
   const String password = body["password"] | "";
@@ -746,7 +751,7 @@ COMPANION_POST(handleWifiUpdate) {
 }
 
 COMPANION_POST(handleWifiRemove) {
-  JsonDocument body;
+  JsonDocument body(psramJson());
   if (!readJsonBody(req, body)) return sendError(req, 400, "Invalid request");
   String ssid = body["ssid"] | "";
   ssid.trim();
@@ -755,7 +760,7 @@ COMPANION_POST(handleWifiRemove) {
 }
 
 COMPANION_POST(handleLanguage) {
-  JsonDocument body;
+  JsonDocument body(psramJson());
   if (!readJsonBody(req, body)) return sendError(req, 400, "Invalid request");
   String voice = body["speechVoice"] | "", language = body["uiLanguage"] | "";
   voice.trim();
@@ -767,7 +772,7 @@ COMPANION_POST(handleLanguage) {
 }
 
 COMPANION_POST(handleMinutes) {
-  JsonDocument body;
+  JsonDocument body(psramJson());
   if (!readJsonBody(req, body)) return sendError(req, 400, "Invalid request");
   String url = body["url"] | "", key = body["key"] | "";
   url.trim();
@@ -777,7 +782,7 @@ COMPANION_POST(handleMinutes) {
 }
 
 COMPANION_POST(handleHotspot) {
-  JsonDocument body;
+  JsonDocument body(psramJson());
   if (!readJsonBody(req, body)) return sendError(req, 400, "Invalid request");
   const bool fixed = String(body["mode"] | "dynamic") == "fixed";
   const String password = body["password"] | "";

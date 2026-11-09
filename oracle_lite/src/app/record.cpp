@@ -116,7 +116,7 @@ static bool recordHeldToPath(const char* path, int holdPin, bool captureMoments,
   // Questions remove their disposable file explicitly before reaching here.
   if (SD_MMC.exists(path)) return false;
 
-  File f = SD_MMC.open(path, FILE_WRITE);
+  File f = sdCreate(path);
   if (!f) return false;
 
   uint8_t header[44]={};
@@ -362,7 +362,7 @@ bool recordMeeting(const char* path, uint32_t& durationMs, void (*onFlushed)(uin
   durationMs = 0;
   Serial.printf("[Meeting] %s\n", path);
   if (SD_MMC.exists(path)) return false;
-  File f = SD_MMC.open(path, FILE_WRITE);
+  File f = sdCreate(path);
   if (!f) return false;
   uint8_t header[44] = {};
   if (f.write(header, 44) != 44 || !writeWavHeader(f, 0)) { f.close(); return false; }
@@ -462,7 +462,7 @@ bool recordMeeting(const char* path, uint32_t& durationMs, void (*onFlushed)(uin
 // ─── Spoken question without holding a button (web ask) ────────────────────
 bool recordQuestionUntilPress(const char* path, uint32_t maxMs) {
   sdRemoveIfExists(path);
-  File f = SD_MMC.open(path, FILE_WRITE);
+  File f = sdCreate(path);
   if (!f) return false;
   uint8_t header[44] = {};
   if (f.write(header, 44) != 44 || !writeWavHeader(f, 0)) { f.close(); return false; }
@@ -517,7 +517,7 @@ bool recordQuestionUntilSilence(const char* path, uint32_t maxMs,
   constexpr uint32_t kNoSpeechMs = 7000;     // nobody spoke: give up
   heardSpeech = false;
   sdRemoveIfExists(path);
-  File f = SD_MMC.open(path, FILE_WRITE);
+  File f = sdCreate(path);
   if (!f) return false;
   uint8_t header[44] = {};
   if (f.write(header, 44) != 44 || !writeWavHeader(f, 0)) { f.close(); return false; }

@@ -1,4 +1,5 @@
 #include "Arduino.h"
+#include "psram_json.h"
 #include "sd_read.h"
 #include "../../config.h"
 #include "../../globals.h"
@@ -100,7 +101,7 @@ static bool transientHttpStatus(int status) {
 }
 
 static bool replaceNetworkFileAtomically(const String& path, const String& temp) {
-  return commitStoredFile(SD_MMC, path, temp);
+  return commitStoredFile(sdFs, path, temp);
 }
 
 String readSmallFile(const char* path, size_t maxLen);
@@ -298,7 +299,7 @@ bool openAiJsonPost(const char* endpoint, const String& payload, String& respons
 }
 
 String responseOutputText(const String& response) {
-  JsonDocument doc;
+  JsonDocument doc(psramJson());
   const DeserializationError error = deserializeJson(doc, response);
   if (error) {
     Serial.printf("[OpenAI] response parse failed: %s bytes=%u\n", error.c_str(), response.length());
@@ -322,7 +323,7 @@ String responseOutputText(const String& response) {
 
 static bool createEmbedding(const String& input, std::vector<float>& embedding) {
   const uint32_t startedAt = millis();
-  JsonDocument request;
+  JsonDocument request(psramJson());
   request["model"] = "text-embedding-3-small";
   request["dimensions"] = 256;
   request["encoding_format"] = "float";
@@ -335,7 +336,7 @@ static bool createEmbedding(const String& input, std::vector<float>& embedding) 
     performanceStats.embeddingMs = millis() - startedAt;
     return false;
   }
-  JsonDocument document;
+  JsonDocument document(psramJson());
   if (deserializeJson(document, response)) return false;
   JsonArrayConst values = document["data"][0]["embedding"].as<JsonArrayConst>();
   if (values.size() != 256) return false;
@@ -478,7 +479,7 @@ static bool transcribeTextOnce(const String& wavPath, String& text) {
     return false;
   }
   lastCloudError = "";
-  JsonDocument transcriptDocument;
+  JsonDocument transcriptDocument(psramJson());
   if (deserializeJson(transcriptDocument, response.body.c_str()) ||
       !transcriptDocument["text"].is<const char*>()) { lastCloudError = "BAD TRANSCRIPT"; return false; }
   text = transcriptDocument["text"].as<const char*>();
@@ -511,7 +512,7 @@ bool transcribe(const String& wavPath, int noteNum) {
   String tp = wavPath; tp.replace(".wav", ".txt");
   const String temp = tp + ".tmp";
   sdRemoveIfExists(temp.c_str());
-  File tf = SD_MMC.open(temp.c_str(), FILE_WRITE);
+  File tf = sdCreate(temp.c_str());
   if (!tf) return false;
   const size_t written = tf.print(text);
   tf.flush();
@@ -561,7 +562,7 @@ bool understandNote(int noteNum) {
   snprintf(offset, sizeof(offset), "%c%02d:%02d", offsetMinutes < 0 ? '-' : '+',
            abs(offsetMinutes) / 60, abs(offsetMinutes) % 60);
 
-  JsonDocument request;
+  JsonDocument request(psramJson());
   request["model"] = "gpt-4o-mini";
   request["store"] = false;
   request["max_output_tokens"] = kMemoryOutputTokens;
@@ -662,7 +663,7 @@ bool understandNote(int noteNum) {
   serializeJson(request, payload);
   String response;
   if (!openAiJsonPost("/v1/responses", payload, response, kMemoryTimeoutMs, &lastOrganizationError)) return false;
-  JsonDocument envelope;
+  JsonDocument envelope(psramJson());
   if (deserializeJson(envelope, response)) {
     lastOrganizationError = "organization: invalid response JSON";
     return false;
@@ -675,7 +676,7 @@ bool understandNote(int noteNum) {
   String memoryJson = responseOutputText(response);
   // The extractor is explicitly instructed to use the capture offset. Undo
   // that conversion, then apply the device's rules for the target date.
-  JsonDocument datedMemory;
+  JsonDocument datedMemory(psramJson());
   if (!deserializeJson(datedMemory, memoryJson)) {
     setenv("TZ", LOCAL_TZ_RULE, 1); tzset();
     for (JsonObject task : datedMemory["tasks"].as<JsonArray>()) {
@@ -794,7 +795,7 @@ bool answerFromBrain(const String& question, String& answer, std::vector<int>& s
                    " title=" + task.text;
   }
 
-  JsonDocument request;
+  JsonDocument request(psramJson());
   request["model"] = "gpt-4o-mini";
   request["store"] = false;
   request["max_output_tokens"] = kActionOutputTokens;
@@ -859,7 +860,7 @@ bool answerFromBrain(const String& question, String& answer, std::vector<int>& s
   String response;
   if (!openAiJsonPost("/v1/responses", payload, response)) return false;
   String routedJson = responseOutputText(response);
-  JsonDocument routed;
+  JsonDocument routed(psramJson());
   const DeserializationError routedError = deserializeJson(routed, routedJson);
   if (routedError) {
     Serial.printf("[OpenAI] action response parse failed: %s characters=%u\n",
@@ -1335,7 +1336,7 @@ bool playBrainSpeech(const String& text, const char* fallbackPath, int sourceCou
   int responseStatus = 0;
   if (oracleHasOpenAiKey() && WiFi.status() == WL_CONNECTED && stream.begin()) {
     oracleSoundSetEnabled(false);
-    JsonDocument request;
+    JsonDocument request(psramJson());
     request["model"] = "gpt-4o-mini-tts";
     request["voice"] = openAiVoice();
     request["input"] = speechFriendlyTimes(text);
@@ -1432,7 +1433,7 @@ bool synthesizeBrainSpeech(const String& text, const char* outputPath, bool fast
     // tts-1 first returned HTTP 400 on every request and delayed playback by
     // roughly 1.5 seconds. Retry the working model only for a prompt API error.
     const char* model = "gpt-4o-mini-tts";
-    JsonDocument request;
+    JsonDocument request(psramJson());
     request["model"] = model;
     request["voice"] = openAiVoice();
     request["input"] = speechFriendlyTimes(text);
@@ -1474,7 +1475,7 @@ bool synthesizeBrainSpeech(const String& text, const char* outputPath, bool fast
     const String path = outputPath;
     const String temp = path + ".tmp";
     sdRemoveIfExists(temp.c_str());
-    File file = SD_MMC.open(temp.c_str(), FILE_WRITE);
+    File file = sdCreate(temp.c_str());
     if (!file) { Serial.println("[TTS] temporary file open failed"); client.stop(); break; }
     // HTTPClient's stream loop can wait forever on a connected, silent socket.
     // Decode framing incrementally, buffering only one SD block, not all audio.

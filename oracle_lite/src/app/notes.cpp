@@ -20,16 +20,16 @@ constexpr const char* kIndexTemp = "/notes/index.tmp";
 constexpr const char* kIndexBackup = "/notes/index.bak";
 
 bool replaceNoteFileAtomically(const String& path, const String& temp) {
-  return commitStoredFile(SD_MMC, path, temp);
+  return commitStoredFile(sdFs, path, temp);
 }
 }
 
 void loadIndex(bool recoverOrphans) {
   noteIndex.clear();
   // Recover the last complete catalog after an interrupted FAT rename.
-  if (!SD_MMC.exists(INDEX_FILE)) {
-    if (SD_MMC.exists(kIndexBackup)) SD_MMC.rename(kIndexBackup, INDEX_FILE);
-    else if (SD_MMC.exists(kIndexTemp)) SD_MMC.rename(kIndexTemp, INDEX_FILE);
+  if (!sdExists(INDEX_FILE)) {
+    if (sdExists(kIndexBackup)) sdRename(kIndexBackup, INDEX_FILE);
+    else if (sdExists(kIndexTemp)) sdRename(kIndexTemp, INDEX_FILE);
   }
   File f = sdOpenRead(INDEX_FILE);
   if (f) {
@@ -75,7 +75,7 @@ void loadIndex(bool recoverOrphans) {
       strncpy(recovered.tag, "Inbox", sizeof(recovered.tag) - 1);
       char textPath[64];
       snprintf(textPath, sizeof(textPath), "%s/note_%03d.txt", NOTES_DIR, num);
-      recovered.hasText = SD_MMC.exists(textPath);
+      recovered.hasText = sdExists(textPath);
       recovered.momentCount = static_cast<uint16_t>(noteMomentCount(num));
       noteIndex.push_back(recovered);
       repaired = true;
@@ -89,19 +89,19 @@ void loadIndex(bool recoverOrphans) {
     for (NoteEntry& note : noteIndex) {
       char textPath[64];
       snprintf(textPath, sizeof(textPath), "%s/note_%03d.txt", NOTES_DIR, note.num);
-      recoverStoredFile(SD_MMC, String(textPath));
+      recoverStoredFile(sdFs, String(textPath));
       File text = sdOpenRead(textPath);
       const bool hasText = text && text.size() > 0;
       if (text) text.close();
       if (note.hasText != hasText) { note.hasText = hasText; repaired = true; }
     }
   }
-  if (repaired || !SD_MMC.exists(INDEX_FILE)) saveIndex();
+  if (repaired || !sdExists(INDEX_FILE)) saveIndex();
 }
 
 bool saveIndex() {
-  if (SD_MMC.exists(kIndexTemp)) sdRemoveIfExists(kIndexTemp);
-  File f = SD_MMC.open(kIndexTemp, FILE_WRITE);
+  if (sdExists(kIndexTemp)) sdRemoveIfExists(kIndexTemp);
+  File f = sdCreate(kIndexTemp);
   if (!f) return false;
   size_t expected = 0;
   bool complete = true;
@@ -160,7 +160,7 @@ bool deleteNote(int num) {
     snprintf(path, sizeof(path), "%s/note_%03d.%s", NOTES_DIR, num, exts[e]);
     for (const char* suffix : {".tmp", ".bak", ""}) {
       const String target = String(path) + suffix;
-      if (SD_MMC.exists(target.c_str()) && !sdRemoveIfExists(target.c_str())) return false;
+      if (sdExists(target.c_str()) && !sdRemoveIfExists(target.c_str())) return false;
     }
   }
   for (int i = 0; i < (int)noteIndex.size(); i++) {
@@ -215,7 +215,7 @@ bool deleteAllNotes() {
     noteIndex.erase(std::remove_if(noteIndex.begin(), noteIndex.end(), [](const NoteEntry& note) {
       char path[64];
       snprintf(path, sizeof(path), "%s/note_%03d.wav", NOTES_DIR, note.num);
-      return !SD_MMC.exists(path);
+      return !sdExists(path);
     }), noteIndex.end());
     saveIndex();
     return false;
@@ -232,7 +232,7 @@ int nextNoteNumber() {
     if (maxNum == INT32_MAX) return -1;
     ++maxNum;
     snprintf(path, sizeof(path), "%s/note_%03d.wav", NOTES_DIR, maxNum);
-  } while (SD_MMC.exists(path));
+  } while (sdExists(path));
   return maxNum;
 }
 
@@ -254,7 +254,7 @@ String noteMetaPath(int num) {
 
 String readNoteMetaValue(int num, const char* key) {
   String path = noteMetaPath(num);
-  recoverStoredFile(SD_MMC, path);
+  recoverStoredFile(sdFs, path);
   File f = sdOpenRead(path.c_str());
   if (!f) return "";
   String prefix = String(key) + "=";
@@ -272,7 +272,7 @@ bool writeNoteMeta(int num, const char* tag) {
   String existingCreated = readNoteMetaValue(num, "created_utc");
   String created = existingCreated.length() ? existingCreated : currentUtcIso();
   sdRemoveIfExists(temp.c_str());
-  File f = SD_MMC.open(temp.c_str(), FILE_WRITE);
+  File f = sdCreate(temp.c_str());
   if (!f) return false;
   bool hasText = false;
   for (int i = 0; i < (int)noteIndex.size(); i++)
@@ -292,7 +292,7 @@ static String queuePath(int num) {
 }
 
 static String readQueueValue(int num, const char* key) {
-  recoverStoredFile(SD_MMC, queuePath(num));
+  recoverStoredFile(sdFs, queuePath(num));
   File file = sdOpenRead(queuePath(num));
   if (!file) return "";
   const String prefix = String(key) + "=";
@@ -370,7 +370,7 @@ bool writeNoteQueueState(int num, const char* state, const char* error, bool inc
   if (incrementRetry) failedUtc = currentUtcIso();
   if (progressMade) failedUtc = "";
   sdRemoveIfExists(temp.c_str());
-  File file = SD_MMC.open(temp.c_str(), FILE_WRITE);
+  File file = sdCreate(temp.c_str());
   if (!file) { Serial.printf("[Storage] queue open failed #%d\n", num); return false; }
   const String contents = String("state=") + (state ? state : "queued") + "\nretries=" + String(retries) +
       "\nfailures=" + String(failures) + "\nlast_failure_utc=" + failedUtc + "\nerror=" +
@@ -400,8 +400,8 @@ static String noteMomentsPath(int num) {
 bool saveNoteMoments(int num, const std::vector<uint32_t>& momentsMs) {
   String path = noteMomentsPath(num);
   String temp = path + ".tmp";
-  if (SD_MMC.exists(temp.c_str())) sdRemoveIfExists(temp.c_str());
-  File f = SD_MMC.open(temp.c_str(), FILE_WRITE);
+  if (sdExists(temp.c_str())) sdRemoveIfExists(temp.c_str());
+  File f = sdCreate(temp.c_str());
   if (!f) return false;
   size_t expected = 0;
   bool complete = true;
@@ -421,7 +421,7 @@ bool saveNoteMoments(int num, const std::vector<uint32_t>& momentsMs) {
 std::vector<uint32_t> loadNoteMoments(int num) {
   std::vector<uint32_t> result;
   String path = noteMomentsPath(num);
-  recoverStoredFile(SD_MMC, path);
+  recoverStoredFile(sdFs, path);
   File f = sdOpenRead(path.c_str());
   if (!f) return result;
   while (f.available()) {
