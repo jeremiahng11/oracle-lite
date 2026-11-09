@@ -102,12 +102,26 @@ void sdCacheReset() {
   count = 0;
 }
 
+uint32_t buildFailedAt = 0;
+
 bool sdExists(const char* path) {
   const char* name = cachedName(path);
   if (!name) return SD_MMC.exists(path);
   Guard guard;
-  if (!valid && !build()) return SD_MMC.exists(path);
+  if (!valid) {
+    // If the list can't be built (e.g. PSRAM short), don't rescan the folder
+    // on every call: use the card directly and retry in 30 s.
+    if (buildFailedAt && millis() - buildFailedAt < 30000UL) return SD_MMC.exists(path);
+    if (!build()) { buildFailedAt = millis() | 1; return SD_MMC.exists(path); }
+    buildFailedAt = 0;
+  }
   return find(name) >= 0;
+}
+
+void sdCacheMismatch() {
+  Guard guard;
+  if (valid) Serial.println("[SD] folder list out of step with the card; rebuilding");
+  valid = false;
 }
 
 File sdCreate(const char* path) {

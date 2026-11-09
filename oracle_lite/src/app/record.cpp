@@ -114,7 +114,10 @@ static bool recordHeldToPath(const char* path, int holdPin, bool captureMoments,
 
   // A recording absent from the catalog must never be silently overwritten.
   // Questions remove their disposable file explicitly before reaching here.
-  if (SD_MMC.exists(path)) return false;
+  if (SD_MMC.exists(path)) {
+    if (!sdExists(path)) sdCacheMismatch();   // the list missed this file
+    return false;
+  }
 
   File f = sdCreate(path);
   if (!f) return false;
@@ -361,7 +364,10 @@ bool recordMeeting(const char* path, uint32_t& durationMs, void (*onFlushed)(uin
   constexpr uint32_t kScreenEveryMs = 60000UL;
   durationMs = 0;
   Serial.printf("[Meeting] %s\n", path);
-  if (SD_MMC.exists(path)) return false;
+  if (SD_MMC.exists(path)) {
+    if (!sdExists(path)) sdCacheMismatch();   // the list missed this file
+    return false;
+  }
   File f = sdCreate(path);
   if (!f) return false;
   uint8_t header[44] = {};

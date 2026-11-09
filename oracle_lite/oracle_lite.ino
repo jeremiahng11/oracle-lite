@@ -39,6 +39,7 @@ SET_LOOP_TASK_STACK_SIZE(16 * 1024);
 #include "src/app/reminders.h"
 #include <ESPmDNS.h>
 #include "src/app/sd_read.h"
+#include <Preferences.h>
 #include "src/app/psram_json.h"
 #include "src/app/ui.h"
 
@@ -1831,16 +1832,51 @@ void initializeDisplay() {
   // the controller base image, avoiding two slow full refreshes during wake.
 }
 
+// Writes a 32 KB pattern, reads it back and compares (fresh mount only).
+bool sdBusSelfTest() {
+  constexpr const char* kPath = "/.sdtest.bin";
+  constexpr size_t kBlock = 4096, kBlocks = 8;
+  std::vector<uint8_t> out(kBlock), in(kBlock);
+  bool ok = true;
+  File f = SD_MMC.open(kPath, FILE_WRITE);
+  if (!f) return false;
+  for (size_t b = 0; b < kBlocks && ok; b++) {
+    for (size_t i = 0; i < kBlock; i++) out[i] = static_cast<uint8_t>((i * 31 + b * 7) ^ (i >> 5));
+    ok = f.write(out.data(), kBlock) == kBlock;
+  }
+  f.close();
+  f = ok ? SD_MMC.open(kPath) : File();
+  ok = ok && f;
+  for (size_t b = 0; b < kBlocks && ok; b++) {
+    for (size_t i = 0; i < kBlock; i++) out[i] = static_cast<uint8_t>((i * 31 + b * 7) ^ (i >> 5));
+    ok = f.read(in.data(), kBlock) == static_cast<int>(kBlock) && memcmp(in.data(), out.data(), kBlock) == 0;
+  }
+  if (f) f.close();
+  SD_MMC.remove(kPath);
+  return ok;
+}
+
 void initializeStorage(bool recoverOrphans) {
   SD_MMC.setPins(SD_CLK, SD_CMD, SD_D0);
-  // 40 MHz high-speed bus doubles card throughput; cards or wiring that
-  // can't do it fall back to the standard 20 MHz.
-  bool mounted = SD_MMC.begin("/sdcard", true, false, SDMMC_FREQ_HIGHSPEED, 8);
-  if (!mounted) {
-    Serial.println("[SD] 40 MHz mount failed; using 20 MHz");
-    SD_MMC.end();
-    mounted = SD_MMC.begin("/sdcard", true, false, SDMMC_FREQ_DEFAULT, 8);
+  // 40 MHz high-speed bus doubles card throughput. The card only reports
+  // trouble once data flows, so a fast mount is checked by writing and
+  // reading back 32 KB; if that fails (or failed before), use 20 MHz.
+  Preferences sdPrefs;
+  sdPrefs.begin("oracle_sd", false);
+  const bool slowBus = sdPrefs.getBool("slow", false);
+  bool mounted = false;
+  if (!slowBus) {
+    mounted = SD_MMC.begin("/sdcard", true, false, SDMMC_FREQ_HIGHSPEED, 8) && sdBusSelfTest();
+    if (!mounted) {
+      Serial.println("[SD] 40 MHz check failed; using 20 MHz from now on");
+      SD_MMC.end();
+      sdPrefs.putBool("slow", true);
+    } else {
+      Serial.println("[SD] 40 MHz bus OK");
+    }
   }
+  if (!mounted) mounted = SD_MMC.begin("/sdcard", true, false, SDMMC_FREQ_DEFAULT, 8);
+  sdPrefs.end();
   if (!mounted) {
     showError("SD ERROR");
     while (true) delay(1000);

@@ -25,11 +25,17 @@ bool sdMkdir(const char* path);
 
 // Forget the cached listing (after mounting, or if the card was changed).
 void sdCacheReset();
+// Called when the card disagrees with the list (a listed file can't be
+// opened, or an unlisted one exists): rebuild it on next use.
+void sdCacheMismatch();
 
 // Opening a missing file for reading makes the ESP32 file layer log
 // "[E] ... does not exist"; many files here are optional, so check first.
 inline File sdOpenRead(const char* path) {
-  return sdExists(path) ? SD_MMC.open(path) : File();
+  if (!sdExists(path)) return File();
+  File file = SD_MMC.open(path);
+  if (!file) sdCacheMismatch();
+  return file;
 }
 inline File sdOpenRead(const String& path) { return sdOpenRead(path.c_str()); }
 
