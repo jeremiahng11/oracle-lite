@@ -115,6 +115,8 @@ Wi-Fi network and/or replace the OpenAI key. Empty fields are kept.
 
 `POST /api/settings/hotspot` `{"mode": "fixed" | "dynamic", "password": ""}` (8–63 chars; empty keeps it)
 
+`POST /api/settings/vocabulary` `{"words": "Manco, Acme"}` — names/terms the transcription and AI should spell exactly (boot has `vocabulary`)
+
 `POST /api/key/clear` → removes the OpenAI key
 
 All of these return `{"ok": true}` or an error.

@@ -45,6 +45,9 @@ bool oracleApPasswordFixed();
 bool oracleHasApPassword();
 String oracleApPassword();
 bool oracleSetApPassword(bool fixed, const String& password);
+// Names/terms the transcription should spell exactly ("Manco, Aleta, ...").
+String oracleVocabulary();
+bool oracleSetVocabulary(const String& words);
 bool oracleHasMinutesKey();
 bool oracleSaveMinutes(const String& url, const String& apiKey);
 bool oracleClearMinutesKey();

@@ -379,8 +379,13 @@ static bool transcribeTextOnce(const String& wavPath, String& text) {
   }
 
   String bnd = "----OracleBoundary";
-  String pre = "--" + bnd + "\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\ngpt-4o-mini-transcribe\r\n"
-               "--" + bnd + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"note.wav\"\r\nContent-Type: audio/wav\r\n\r\n";
+  String pre = "--" + bnd + "\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\ngpt-4o-mini-transcribe\r\n";
+  // Names and words from Setup (e.g. "Manco") so they are spelled right.
+  const String vocabulary = oracleVocabulary();
+  if (vocabulary.length())
+    pre += "--" + bnd + "\r\nContent-Disposition: form-data; name=\"prompt\"\r\n\r\nNames and terms that may appear: " +
+           vocabulary + ".\r\n";
+  pre += "--" + bnd + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"note.wav\"\r\nContent-Type: audio/wav\r\n\r\n";
   String post = "\r\n--" + bnd + "--\r\n";
   size_t totalLen = pre.length() + fileSize + post.length();
   const String headers = String("POST /v1/audio/transcriptions HTTP/1.1\r\n") +
@@ -593,7 +598,10 @@ bool understandNote(int noteNum) {
     "people, projects, task titles, decisions, facts, and questions. Never translate those fields into the language "
     "of these instructions. ") +
     configuredLanguageInstruction("every human-readable output field") +
-    " Set the language field to " + outputLanguageCode + ".";
+    " Set the language field to " + outputLanguageCode + "." +
+    (oracleVocabulary().length() ? String(" The user's own names and terms are: ") + oracleVocabulary() +
+       ". Speech recognition sometimes misspells them; when a word clearly sounds like one of these (e.g. 'maco' or 'main call' for "
+       "'Manco'), write it exactly as listed, keeping its capitalisation.") : String(""));
   request["input"] = String("Required output language: ") + outputLanguage + " (" + outputLanguageCode + ")" +
                      "\nCaptured UTC: " + capturedUtc +
                      "\nCaptured local time: " + capturedLocal +

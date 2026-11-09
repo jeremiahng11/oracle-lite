@@ -187,6 +187,7 @@ COMPANION_GET(handleBoot) {
   doc["has"]["apPassword"] = oracleHasApPassword();
   doc["apFixed"] = oracleApPasswordFixed();
   doc["minutesUrl"] = oracleMinutesUrl();
+  doc["vocabulary"] = oracleVocabulary();
   // Memory health, for diagnosing (not shown in the app).
   doc["mem"]["internalFree"] = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
   doc["mem"]["internalLargest"] = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
@@ -793,6 +794,13 @@ COMPANION_POST(handleHotspot) {
   return sendOk(req);
 }
 
+COMPANION_POST(handleVocabulary) {
+  JsonDocument body(psramJson());
+  if (!readJsonBody(req, body)) return sendError(req, 400, "Invalid request");
+  if (!oracleSetVocabulary(body["words"] | "")) return sendError(req, 500, "Could not save the words.");
+  return sendOk(req);
+}
+
 COMPANION_POST(handleKeyClear) {
   if (!oracleClearOpenAiKey()) return sendError(req, 500, "Could not clear the API key. Please try again.");
   return sendOk(req);
@@ -892,6 +900,7 @@ bool companionServerStart() {
     {"/api/settings/minutes", HTTP_POST, handleMinutes},
     {"/api/settings/hotspot", HTTP_POST, handleHotspot},
     {"/api/key/clear", HTTP_POST, handleKeyClear},
+    {"/api/settings/vocabulary", HTTP_POST, handleVocabulary},
     {"/firmware", HTTP_POST, handleFirmware},
     {"/audio", HTTP_GET, handleAudio},
     {"/wav", HTTP_GET, handleWavDownload},

@@ -145,7 +145,7 @@ def build_state():
             "storage": {"used": 0, "total": 31914983424},
             "wifi": {"mode": "sta", "ssid": "Home-WiFi", "ip": "192.168.1.23"},
             "has": {"wifi": True, "openai": True, "minutes": True, "apPassword": True},
-            "apFixed": False, "minutesUrl": "https://minutes.example.com",
+            "apFixed": False, "minutesUrl": "https://minutes.example.com", "vocabulary": "Manco",
             "profiles": ["Home-WiFi", "Office-Guest"],
         },
         "memories": mems, "agenda": agenda, "extras": extras, "now": now,
@@ -475,6 +475,9 @@ class Handler(BaseHTTPRequestHandler):
                 if lang not in "en de fr es it pl cs ru uk nl pt".split() or voice not in ("eleven", "cedar", "coral"):
                     return self.err(400, "Unknown language or voice")
                 boot_["lang"], boot_["voice"] = lang, voice
+                return self.ok()
+            if p == "/api/settings/vocabulary":
+                boot_["vocabulary"] = (b.get("words") or "").strip()[:400]
                 return self.ok()
             if p == "/api/settings/minutes":
                 boot_["minutesUrl"] = (b.get("url") or "").strip()

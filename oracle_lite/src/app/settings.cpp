@@ -362,3 +362,26 @@ bool oracleSetApPassword(bool fixed, const String& password) {
   if (fixed && !oracleHasApPassword()) return false;   // nothing to use yet
   return prefs.putBool("ap_fixed", fixed) == 1;
 }
+
+
+// ─── Own names and terms (spelling help for transcription) ─────────────────
+// Default list starts with the user's own committee name.
+String oracleVocabulary() {
+  oracleSettingsBegin();
+  if (!ready) return "";
+  if (!prefs.isKey("vocab")) return "Manco";
+  return prefs.getString("vocab", "");
+}
+
+bool oracleSetVocabulary(const String& words) {
+  oracleSettingsBegin();
+  if (!ready) return false;
+  // One line, comma separated, at most 400 characters.
+  String clean;
+  for (size_t i = 0; i < words.length() && clean.length() < 400; i++) {
+    const char c = words[i];
+    clean += (c == '\n' || c == '\r' || c == ';') ? ',' : c;
+  }
+  clean.trim();
+  return prefs.putString("vocab", clean) == clean.length();
+}
