@@ -315,4 +315,41 @@ inline bool mentionsSubject(const std::string& itemText, const std::vector<std::
   return false;
 }
 
+
+// Finds a clock time in text such as "9:30", "9.30pm", "3 pm", "21:15".
+// Returns false when there is none (dates like 6/11 are not times).
+inline bool clockTimeIn(const std::string& textIn, int& hour, int& minute) {
+  std::string text;
+  for (char c : textIn) text += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  for (size_t i = 0; i < text.size(); i++) {
+    if (!std::isdigit(static_cast<unsigned char>(text[i])) || (i > 0 && std::isdigit(static_cast<unsigned char>(text[i - 1])))) continue;
+    size_t j = i;
+    int h = 0;
+    while (j < text.size() && std::isdigit(static_cast<unsigned char>(text[j])) && j - i < 2) h = h * 10 + (text[j++] - '0');
+    if (j < text.size() && std::isdigit(static_cast<unsigned char>(text[j]))) continue;   // 3+ digits
+    int m = 0;
+    bool hasMinutes = false;
+    if (j + 2 < text.size() && (text[j] == ':' || text[j] == '.') &&
+        std::isdigit(static_cast<unsigned char>(text[j + 1])) &&
+        std::isdigit(static_cast<unsigned char>(text[j + 2])) &&
+        (j + 3 >= text.size() || !std::isdigit(static_cast<unsigned char>(text[j + 3])))) {
+      m = (text[j + 1] - '0') * 10 + (text[j + 2] - '0');
+      hasMinutes = true;
+      j += 3;
+    }
+    size_t k = j;
+    while (k < text.size() && text[k] == ' ') k++;
+    const bool pm = text.compare(k, 2, "pm") == 0 || text.compare(k, 4, "p.m.") == 0;
+    const bool am = text.compare(k, 2, "am") == 0 || text.compare(k, 4, "a.m.") == 0;
+    if (!hasMinutes && !am && !pm) continue;   // a bare number is not a time
+    if (h > 23 || m > 59 || ((am || pm) && (h < 1 || h > 12))) continue;
+    if (pm && h < 12) h += 12;
+    if (am && h == 12) h = 0;
+    hour = h;
+    minute = m;
+    return true;
+  }
+  return false;
+}
+
 }  // namespace agenda

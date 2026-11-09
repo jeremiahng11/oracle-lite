@@ -991,6 +991,12 @@ static String agendaWhen(const BrainTaskRecord& item, const String& skipDay, con
   return out;
 }
 
+// "maco meeting" -> "Maco meeting" for lists that are read out or shown.
+static String firstUpper(String text) {
+  if (text.length() && text[0] >= 'a' && text[0] <= 'z') text.setCharAt(0, text[0] - 32);
+  return text;
+}
+
 bool answerAgendaQuestion(const String& question, String& answer, std::vector<int>& sourceNotes) {
   if (oracleUiLanguage() != "de" && oracleUiLanguage() != "en") return false;
   String lowerArduino = question;
@@ -1092,7 +1098,7 @@ bool answerAgendaQuestion(const String& question, String& answer, std::vector<in
       if (i) out += "; ";
       const String when = items[i].dueUtc.length()
         ? agendaWhen(items[i], skipDay, today, tomorrow, german) : String("");
-      out += items[i].text;
+      out += firstUpper(items[i].text);
       if (when.length()) out += String(", ") + dueWord + when;
     }
     return out;
@@ -1159,7 +1165,7 @@ static String briefingList(const std::vector<BrainTaskRecord>& items, size_t lim
   String out;
   for (size_t i = 0; i < items.size() && i < limit; i++) {
     if (i) out += "; ";
-    out += items[i].text;
+    out += firstUpper(items[i].text);
     if (items[i].dueUtc.length()) {
       const String local = utcToLocalDeviceLabel(items[i].dueUtc);
       const String when = agendaWhen(items[i], withDay ? String("") : local.substring(0, 10), today, tomorrow, german);

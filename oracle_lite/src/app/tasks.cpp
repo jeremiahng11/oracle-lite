@@ -1,4 +1,5 @@
 #include "tasks.h"
+#include "agenda_range.h"
 #include "sd_read.h"
 
 #include "brain.h"
@@ -138,6 +139,32 @@ static std::vector<BrainTaskRecord> readBrainTasks() {
       if (index < memory.taskDueUtc.size()) task.dueUtc = memory.taskDueUtc[index];
       if (index < memory.taskTypes.size()) task.type = memory.taskTypes[index];
       if (index < memory.taskDatePrecision.size()) task.datePrecision = memory.taskDatePrecision[index];
+      // Older memories: an appointment with a time but no day ("meeting
+      // 9:30") was stored undated. Give it the next occurrence of that time
+      // after it was recorded (tomorrow if said in the evening).
+      if (task.type == "event" && !task.dueUtc.length() && task.createdUtc.length() >= 16) {
+        const String said = (index < memory.taskOriginalTimeText.size() ? memory.taskOriginalTimeText[index] : String("")) +
+                            " " + task.text;
+        int hour, minute;
+        const String createdLocal = utcToLocalDeviceLabel(task.createdUtc);
+        if (agenda::clockTimeIn(said.c_str(), hour, minute) && createdLocal.length() >= 16) {
+          String lower = said;
+          lower.toLowerCase();
+          long day = agenda::dayNumber(createdLocal.substring(0, 10).c_str());
+          const int createdMinutes = createdLocal.substring(11, 13).toInt() * 60 + createdLocal.substring(14, 16).toInt();
+          if (lower.indexOf("tomorrow") >= 0 || lower.indexOf("morgen") >= 0) day += 1;
+          else if (lower.indexOf("today") < 0 && lower.indexOf("heute") < 0 && hour * 60 + minute <= createdMinutes) day += 1;
+          const long long localEpoch = static_cast<long long>(day) * 86400 + hour * 3600 + minute * 60;
+          const long long utcEpoch = localEpoch - static_cast<long long>(localUtcOffsetMinutes(task.createdUtc)) * 60;
+          int y, mo, d;
+          agenda::civilFromDays(static_cast<long>(utcEpoch / 86400), y, mo, d);
+          const long secs = static_cast<long>(utcEpoch % 86400);
+          char iso[24];
+          snprintf(iso, sizeof(iso), "%04d-%02d-%02dT%02ld:%02ld:00Z", y, mo, d, secs / 3600, (secs / 60) % 60);
+          task.dueUtc = iso;
+          task.datePrecision = "time";
+        }
+      }
       const TaskState* state = findState(states, task.id);
       // A title-only fallback could mark a new occurrence on another date
       // completed. Completion is tied to the persisted task ID instead.
