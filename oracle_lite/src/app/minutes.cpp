@@ -895,22 +895,7 @@ struct VoiceTarget {
 // is understood. Cleared when a new conversation starts.
 std::vector<std::pair<String, String>> voiceHistory;
 
-VoiceTarget voiceTarget() {
-  VoiceTarget target;
-  String host = oracleMinutesUrl();
-  const bool tls = host.startsWith("https://");
-  host = host.substring(tls ? 8 : 7);
-  String prefix;
-  target.port = tls ? 443 : 80;
-  const int slash = host.indexOf('/');
-  if (slash >= 0) { prefix = host.substring(slash); host = host.substring(0, slash); }
-  const int colon = host.indexOf(':');
-  if (colon >= 0) { target.port = host.substring(colon + 1).toInt(); host = host.substring(0, colon); }
-  target.host = host;
-  target.prefix = prefix;
-
-  JsonDocument ask(psramJson());
-  JsonArray messages = ask["messages"].to<JsonArray>();
+static void addVoiceMessages(JsonArray messages) {
   JsonObject system = messages.add<JsonObject>();
   system["role"] = "system";
   system["content"] =
@@ -931,6 +916,24 @@ VoiceTarget voiceTarget() {
     replied["role"] = "assistant";
     replied["content"] = voiceHistory[i].second.substring(0, 400);
   }
+}
+
+VoiceTarget voiceTarget() {
+  VoiceTarget target;
+  String host = oracleMinutesUrl();
+  const bool tls = host.startsWith("https://");
+  host = host.substring(tls ? 8 : 7);
+  String prefix;
+  target.port = tls ? 443 : 80;
+  const int slash = host.indexOf('/');
+  if (slash >= 0) { prefix = host.substring(slash); host = host.substring(0, slash); }
+  const int colon = host.indexOf(':');
+  if (colon >= 0) { target.port = host.substring(colon + 1).toInt(); host = host.substring(0, colon); }
+  target.host = host;
+  target.prefix = prefix;
+
+  JsonDocument ask(psramJson());
+  addVoiceMessages(ask["messages"].to<JsonArray>());
   String askJson;
   serializeJson(ask, askJson);
   size_t encodedLength = 0;
@@ -1315,6 +1318,41 @@ bool oracleVoiceAsk(const char* wavPath, String& question, String& answer, Strin
   file.close();
   if (!sent) { client.stop(); error = "UPLOAD FAILED"; return false; }
   const int status = readVoiceReply(client, startedAt, millis(), question, answer, error);
+  return status == 200 && answer.length() > 0;
+}
+
+// A question that is already text (e.g. the server heard it but its spoken
+// reply had no answer): server 1.45+ answers JSON {"text": ...} on
+// /api/voice with the same fast stream (search, answer and voice sentence by
+// sentence), instead of /api/ask followed by /api/tts.
+bool oracleVoiceAskText(const String& text, String& question, String& answer, String& error) {
+  question = ""; answer = ""; error = "";
+  if (!oracleHasMinutesKey()) { error = "ADD MINUTES KEY"; return false; }
+  if (WiFi.status() != WL_CONNECTED) { error = "NO WIFI"; return false; }
+  const VoiceTarget target = voiceTarget();
+  JsonDocument request(psramJson());
+  request["text"] = text;
+  addVoiceMessages(request["messages"].to<JsonArray>());
+  String body;
+  serializeJson(request, body);
+  const String path = target.prefix + "/api/voice?speak=1&intents=0&language=" + oracleUiLanguage() +
+                      "&tz=" + String(localUtcOffsetMinutes(currentUtcIso()));
+  const String head = "POST " + path + " HTTP/1.1\r\nHost: " + target.host +
+                      "\r\nAuthorization: Bearer " + oracleMinutesKey() +
+                      "\r\nContent-Type: application/json\r\nAccept-Encoding: identity\r\nConnection: close"
+                      "\r\nContent-Length: " + String(body.length()) + "\r\n\r\n";
+  Conn conn;
+  Client& client = conn.tls ? static_cast<Client&>(conn.secure) : static_cast<Client&>(conn.plain);
+  const uint32_t startedAt = millis();
+  if (!client.connect(target.host.c_str(), target.port)) { error = "SERVER UNREACHABLE"; return false; }
+  if (!writeAll(client, reinterpret_cast<const uint8_t*>(head.c_str()), head.length()) ||
+      !writeAll(client, reinterpret_cast<const uint8_t*>(body.c_str()), body.length())) {
+    client.stop();
+    error = "UPLOAD FAILED";
+    return false;
+  }
+  const int status = readVoiceReply(client, startedAt, millis(), question, answer, error);
+  if (!question.length()) question = text;
   return status == 200 && answer.length() > 0;
 }
 

@@ -59,6 +59,8 @@ void oracleVoiceCancel();
 bool oracleVoiceFinish(const char* wavPath, String& question, String& answer, String& error);
 // Asks the server a typed question (POST /api/ask); used when a voice reply
 // carried no answer.
+// Typed question on the fast /api/voice stream (server 1.45+), spoken as it arrives.
+bool oracleVoiceAskText(const String& text, String& question, String& answer, String& error);
 bool oracleTextAsk(const String& question, String& answer, String& error);
 // Streams the Oracle server's voice (/api/tts, IMA ADPCM) and plays it while it
 // downloads; shows `display` once audio starts. False = nothing played.

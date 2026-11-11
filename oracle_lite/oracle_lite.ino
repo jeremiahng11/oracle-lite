@@ -1339,11 +1339,16 @@ bool askOneWebQuestion() {
   bool answered = streaming ? oracleVoiceFinish(kQuestionPath, question, answer, error)
                             : oracleVoiceAsk(kQuestionPath, question, answer, error);
   // The server understood the question but its voice reply had no answer:
-  // ask it as text and speak the answer with the device's voice.
+  // ask the same words again as a typed question on the fast stream; servers
+  // older than 1.45 get the old text question + device voice.
   if (!answered && question.length()) {
-    Serial.printf("[Voice] falling back to a text question: %s\n", question.c_str());
+    Serial.printf("[Voice] asking again as text: %s\n", question.c_str());
     showAskProgress("SEARCHING", nullptr);
+    String heard;
     if ((WiFi.status() == WL_CONNECTED || connectConfiguredWifi()) &&
+        oracleVoiceAskText(question, heard, answer, error)) {
+      answered = true;
+    } else if ((WiFi.status() == WL_CONNECTED || connectConfiguredWifi()) &&
         oracleTextAsk(question, answer, error)) {
       answered = true;
       showAskProgress("BUILDING", "VOICE");
