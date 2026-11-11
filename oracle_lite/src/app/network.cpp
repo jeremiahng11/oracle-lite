@@ -8,6 +8,7 @@
 #include "notes.h"
 #include "rtc.h"
 #include "ui.h"
+bool displayIdle();   // draw.cpp
 #include "WiFi.h"
 #include "esp_wifi.h"
 #include "WiFiClientSecure.h"
@@ -1358,7 +1359,7 @@ bool playBrainSpeech(const String& text, const char* fallbackPath, int sourceCou
   const uint32_t startedAt = millis();
   for (int attempt = 0; attempt < 2; ++attempt) {
   OracleSpeechStream stream;
-  bool shown = false, complete = false;
+  bool shown = false, textShown = false, complete = false;
   int responseStatus = 0;
   if (oracleHasOpenAiKey() && WiFi.status() == WL_CONNECTED && stream.begin()) {
     oracleSoundSetEnabled(false);
@@ -1393,10 +1394,11 @@ bool playBrainSpeech(const String& text, const char* fallbackPath, int sourceCou
           if (response.status != 200) return true;
           if (!stream.put(byte)) return false;
           if (!shown && stream.ready()) {
-            showAskSpeaking(text, sourceCount); shown = true;
+            shown = true;   // voice first; text when the panel is free (see below)
             audioPlaying = true; stream.start();
             Serial.printf("[TTS] first playback after %lu ms\n", (unsigned long)(millis() - startedAt));
           }
+          if (shown && !textShown && displayIdle()) { showAskSpeaking(text, sourceCount); textShown = true; }
           return true;
         };
         uint32_t lastByte = millis();
@@ -1422,10 +1424,11 @@ bool playBrainSpeech(const String& text, const char* fallbackPath, int sourceCou
     // No further packets are needed; turn off the radio while buffered audio
     // drains, not after the complete spoken answer.
     /* Wi-Fi stays on while awake (key feature); sleep turns it off */
-    if (complete && !shown) { showAskSpeaking(text, sourceCount); shown = true; audioPlaying = true; }
+    if (complete && !textShown) { showAskSpeaking(text, sourceCount); textShown = true; }
+    if (complete && !shown) { shown = true; audioPlaying = true; }
     const bool success = stream.finish(complete);
     audioPlaying = false; oracleSoundSetEnabled(true);
-    if (stream.wasCancelled() && !shown) showAskSpeaking(text, sourceCount);
+    if (stream.wasCancelled() && !textShown) showAskSpeaking(text, sourceCount);
     performanceStats.speechMs = millis() - startedAt;
     if (retry && !stream.wasCancelled()) {
       Serial.printf("[TTS] retry before playback; HTTP=%d\n", responseStatus);

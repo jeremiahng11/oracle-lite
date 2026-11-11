@@ -17,6 +17,7 @@
 #include <mutex>
 #include <vector>
 #include "speech_stream.h"
+#include "draw.h"
 #include "http_response.h"
 #include "ui.h"
 #include "../../sounds.h"
@@ -1038,6 +1039,19 @@ int readVoiceReply(Client& client, uint32_t startedAt, uint32_t uploadedAt,
   bool ended = false, shown = false, playbackFailed = false;
   uint32_t firstAudioAt = 0, lastScreenAt = 0;
 
+  // Screen updates while the voice streams must never make this loop wait
+  // for the e-paper (that starves the audio buffer and the voice crackles):
+  // remember what to show and draw it once the panel is free.
+  String wantText;
+  bool wantShow = false;
+  auto showSoon = [&](const String& text) { wantText = text; wantShow = true; };
+  auto showIfIdle = [&]() {
+    if (!wantShow || !displayIdle()) return;
+    wantShow = false;
+    shownText = wantText;
+    showAskSpeaking(shownText, 0);
+    lastScreenAt = millis();
+  };
   auto feedBase64 = [&](const String& text) {
     if (!streamReady || playbackFailed || text.length() < 4) return;
     size_t decodedLength = 0;
@@ -1046,18 +1060,15 @@ int readVoiceReply(Client& client, uint32_t startedAt, uint32_t uploadedAt,
                               reinterpret_cast<const uint8_t*>(text.c_str()), text.length()) != 0) return;
     if (!player.feed(decoded.data(), decodedLength)) playbackFailed = true;
     if (!shown && stream.ready()) {
-      // The voice starts: show the answer (once its first words are known;
-      // until then the question stays on screen).
-      if (partialAnswer.length()) {
-        shownText = partialAnswer;
-        showAskSpeaking(shownText, 0);
-        lastScreenAt = millis();
-      }
+      // The voice starts first; the answer goes on screen when the panel is
+      // free (until its first words are known the question stays).
       shown = true;
       audioPlaying = true;
       stream.start();
       firstAudioAt = millis();
+      if (partialAnswer.length()) showSoon(partialAnswer);
     }
+    showIfIdle();
   };
   int lineCount = 0;
   auto anyText = [](const String& payload, std::initializer_list<const char*> keys) {
@@ -1087,14 +1098,10 @@ int readVoiceReply(Client& client, uint32_t startedAt, uint32_t uploadedAt,
       if (part.length()) partialAnswer += (partialAnswer.length() ? " " : "") + part;
       // Show the answer as it arrives while the voice plays (page one only
       // changes until it is full; at most every 2.5 s).
-      if (shown && part.length() && (!shownText.length() || millis() - lastScreenAt >= 2500UL)) {
-        const String next = partialAnswer;
-        if (!shownText.length() || askAnswerPageCount(shownText) == 1) {
-          shownText = next;
-          showAskSpeaking(shownText, 0);
-          lastScreenAt = millis();
-        }
-      }
+      if (shown && part.length() && (!shownText.length() || millis() - lastScreenAt >= 2500UL) &&
+          (!shownText.length() || askAnswerPageCount(shownText) == 1))
+        showSoon(partialAnswer);
+      showIfIdle();
     }
     else if (kind == 'B') feedBase64(payload);
     else if (kind == 'A') answer = anyText(payload, {"answer", "text", "a"});
@@ -1419,7 +1426,7 @@ bool oracleServerTtsStream(const String& spoken, const String& display, int sour
   stream.from24k = false;
   if (!stream.begin()) { client.stop(); return false; }
   AdpcmPlayer player(stream);
-  bool shown = false, playbackFailed = false;
+  bool shown = false, textShown = false, playbackFailed = false;
   uint32_t firstAudioAt = 0;
   std::vector<uint8_t> pending;
   pending.reserve(1024);
@@ -1431,11 +1438,16 @@ bool oracleServerTtsStream(const String& spoken, const String& display, int sour
       if (!player.feed(pending.data(), pending.size())) playbackFailed = true;
       pending.clear();
       if (!shown && stream.ready()) {
-        showAskSpeaking(display, sourceCount);
+        // Voice first; the text goes on screen once the panel is free, so
+        // the download never waits for the e-paper (no crackle).
         shown = true;
         audioPlaying = true;
         stream.start();
         firstAudioAt = millis();
+      }
+      if (shown && !textShown && displayIdle()) {
+        showAskSpeaking(display, sourceCount);
+        textShown = true;
       }
     }
     return !stream.wasCancelled() && !playbackFailed;
@@ -1464,7 +1476,8 @@ bool oracleServerTtsStream(const String& spoken, const String& display, int sour
   if (!pending.empty() && !playbackFailed) player.feed(pending.data(), pending.size());
   player.flush();
   const bool complete = response.done() && response.status == 200 && player.hasAudio();
-  if (complete && !shown) { showAskSpeaking(display, sourceCount); shown = true; audioPlaying = true; }
+  if (complete && !textShown) { showAskSpeaking(display, sourceCount); textShown = true; }
+  if (complete && !shown) { shown = true; audioPlaying = true; }
   const bool played = stream.finish(complete && !playbackFailed);
   audioPlaying = false;
   oracleSoundSetEnabled(true);

@@ -192,6 +192,7 @@ void refreshAtRest() {
 // screens hand that wait to core 0 so network work continues meanwhile. Any
 // new drawing or refresh first waits until the panel has the previous frame.
 static std::atomic<bool> displayBusy{false};
+bool displayIdle() { return !displayBusy.load(); }
 
 void waitForDisplay() {
   while (displayBusy.load()) delay(1);

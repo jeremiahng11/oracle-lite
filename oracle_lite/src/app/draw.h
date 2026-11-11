@@ -30,6 +30,8 @@ void refresh();
 void refreshFast();
 void refreshAsync();     // returns at once; the panel finishes in the background
 void waitForDisplay();
+// True when no panel update is running (drawing now would not have to wait).
+bool displayIdle();
 void refreshAtRest();    // Home: the only place a cleaning (flashing) refresh happens
 void rememberFrameForSleep();
 bool restoreFrameAfterWake();
