@@ -1456,7 +1456,9 @@ int readButtonGesture(bool upper) {
       lastLowAt = now;
       // A press held past the hold time: hold (first press) or the end of
       // a tap sequence (count the taps, wait for release).
-      if (now - lastEdge >= REC_HOLD_MS) {
+      // Top: hold to record starts quickly. Bottom: Ask needs a deliberate
+      // hold, so a slow tap still opens Appointments.
+      if (now - lastEdge >= (upper ? REC_HOLD_MS : BTN_LONG_MS)) {
         if (count <= 1) { noInterrupts(); edges = 0; interrupts(); return 0; }
         while (digitalRead(pin) == LOW) delay(4);
         noInterrupts(); edges = 0; interrupts();

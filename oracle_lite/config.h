@@ -64,7 +64,7 @@
 #define REC_HOLD_MS         320
 #define ASK_DOUBLE_TAP_MS   360UL
 #define COMPANION_HOLD_MS   3000UL
-#define BTN_LONG_MS         600
+#define BTN_LONG_MS         650   // bottom hold = Ask / follow-up (a slow tap stays a tap)
 #define BACKGROUND_IDLE_MS  8000UL
 #define BACKGROUND_RETRY_MS 60000UL
 #define AUTO_SLEEP_IDLE_MS  60000UL
