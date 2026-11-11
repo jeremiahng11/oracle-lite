@@ -1426,7 +1426,7 @@ bool oracleServerTtsStream(const String& spoken, const String& display, int sour
   stream.from24k = false;
   if (!stream.begin()) { client.stop(); return false; }
   AdpcmPlayer player(stream);
-  bool shown = false, textShown = false, playbackFailed = false;
+  bool shown = false, textShown = !display.length(), playbackFailed = false;   // empty display: caller shows the text
   uint32_t firstAudioAt = 0;
   std::vector<uint8_t> pending;
   pending.reserve(1024);

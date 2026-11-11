@@ -1124,8 +1124,9 @@ void askBrain() {
 #if ORACLE_PRIVATE_DIAGNOSTICS
   Serial.printf("[Ask] %s\n[Answer] %s\n", question.c_str(), answer.c_str());
 #endif
-  showAskProgress("BUILDING", "VOICE");
-  const bool speechReady = playBrainSpeech(answer, kAnswerPath, static_cast<int>(sources.size()));
+  // The answer is complete already: show all of it now, then speak it.
+  showAskSpeaking(answer, static_cast<int>(sources.size()));
+  const bool speechReady = playBrainSpeech(answer, kAnswerPath, static_cast<int>(sources.size()), true, false);
   if (!speechReady) {
     stopWifi();
     showError("VOICE FAILED");
@@ -1386,16 +1387,18 @@ void playBriefing(bool weekly) {
   }
   Serial.printf("[Briefing] %s: %d tasks, %d events, %u characters\n", weekly ? "weekly" : "daily",
                 tasks, events, answer.length());
-  bool spoken = false;
+  bool spoken = false, textShown = false;
   if (oracleHasWifi()) {
     if (WiFi.status() != WL_CONNECTED) showAskProgress("CONNECTING", weekly ? "THIS WEEK" : "TODAY");
     if (WiFi.status() == WL_CONNECTED || connectConfiguredWifi()) {
-      showAskProgress("BUILDING", "VOICE");
+      // The briefing text is ready: show it now, then speak it.
+      showAskSpeaking(answer, tasks + events);
+      textShown = true;
       spoken = playBrainSpeech(answer, weekly ? NOTES_DIR "/.oracle-weekly.wav" : NOTES_DIR "/.oracle-briefing.wav",
-                               tasks + events, true);
+                               tasks + events, true, false);
     }
   }
-  if (!spoken) showAskSpeaking(answer, tasks + events);
+  if (!textShown) showAskSpeaking(answer, tasks + events);
   browseAnswerPages(answer, tasks + events);
   returnToReady();
 }

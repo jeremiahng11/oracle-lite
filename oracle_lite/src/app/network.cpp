@@ -1352,14 +1352,14 @@ static String speechFriendlyTimes(const String& source) {
 
 static String openAiVoice() { return oracleSpeechVoice() == "coral" ? "coral" : "cedar"; }
 
-bool playBrainSpeech(const String& text, const char* fallbackPath, int sourceCount, bool fast) {
+bool playBrainSpeech(const String& text, const char* fallbackPath, int sourceCount, bool fast, bool showText) {
   // ElevenLabs (via the Oracle server): streamed and played as it downloads.
-  if (oracleSpeechVoice() == "eleven" && oracleServerTtsStream(speechFriendlyTimes(text), text, sourceCount))
+  if (oracleSpeechVoice() == "eleven" && oracleServerTtsStream(speechFriendlyTimes(text), showText ? text : String(""), sourceCount))
     return true;
   const uint32_t startedAt = millis();
   for (int attempt = 0; attempt < 2; ++attempt) {
   OracleSpeechStream stream;
-  bool shown = false, textShown = false, complete = false;
+  bool shown = false, textShown = !showText, complete = false;
   int responseStatus = 0;
   if (oracleHasOpenAiKey() && WiFi.status() == WL_CONNECTED && stream.begin()) {
     oracleSoundSetEnabled(false);
@@ -1442,7 +1442,7 @@ bool playBrainSpeech(const String& text, const char* fallbackPath, int sourceCou
   }
   // PSRAM/task allocation unavailable: use the proven bounded WAV path.
   if (!synthesizeBrainSpeech(text, fallbackPath, fast)) return false;
-  showAskSpeaking(text, sourceCount);
+  if (showText) showAskSpeaking(text, sourceCount);
   /* Wi-Fi stays on while awake (key feature); sleep turns it off */
   return playWavFile(fallbackPath);
   }

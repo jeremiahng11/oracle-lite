@@ -30,7 +30,9 @@ bool answerAgendaQuestion(const String& question, String& answer, std::vector<in
 bool buildDailyBriefing(String& answer, int& taskCount, int& eventCount);
 bool buildWeeklyBriefing(String& answer, int& taskCount, int& eventCount);
 bool synthesizeBrainSpeech(const String& text, const char* outputPath, bool fast = true);
-bool playBrainSpeech(const String& text, const char* fallbackPath, int sourceCount, bool fast = true);
+// showText=false: the caller already shows the text, so speaking never redraws it.
+bool playBrainSpeech(const String& text, const char* fallbackPath, int sourceCount, bool fast = true,
+                     bool showText = true);
 int processPendingNotes(int preferredNote = -1, int maxNotes = 1);
 
 void stopTransferMode();
