@@ -582,6 +582,12 @@ void returnToReady() {
   state = STATE_IDLE;
   idleInputArmed = false;
   resetActivity();
+  // The press that brought us back (e.g. top on the last Tasks page) may
+  // still be held, and its release can bounce: wait until both buttons are
+  // up and settled, so it is never taken as a new hold (Listening).
+  const uint32_t heldSince = millis();
+  while (!bothButtonsUp() && millis() - heldSince < 3000UL) delay(5);
+  delay(40);
   // Discard the edge that selected Back, then retain any new edge occurring
   // while the e-paper is busy redrawing Home.
   clearLatchedPresses();
