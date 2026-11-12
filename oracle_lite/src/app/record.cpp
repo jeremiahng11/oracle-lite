@@ -458,8 +458,10 @@ bool recordMeeting(const char* path, uint32_t& durationMs, void (*onFlushed)(uin
   while (digitalRead(BTN_REC) == LOW && static_cast<int32_t>(releaseBy - millis()) > 0) delay(5);
   Serial.printf("[Meeting] done: %lu bytes, %lu s\n", (unsigned long)totalMono,
                 (unsigned long)(durationMs / 1000));
-  if (totalMono < SAMPLE_RATE * 2 * 2) {   // under 2 s: discard the accident
+  // Under 10 s is an accidental start: don't keep it.
+  if (totalMono < SAMPLE_RATE * 2 * 10) {
     sdRemoveIfExists(path);
+    Serial.println("[Meeting] under 10 s: not saved");
     return false;
   }
   return headerOk || audioOk;   // a partial recording is still worth sending

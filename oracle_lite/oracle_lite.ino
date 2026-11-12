@@ -1207,9 +1207,10 @@ void recordMeetingMinutes() {
   oracleSoundSetEnabled(true);
   minutesLiveFinish(recorded);
   if (!recorded) {
+    // Under 10 s (an accidental start) or a storage problem: nothing kept.
     stopWifi();
-    showError("MEETING TOO SHORT");
-    delay(1400);
+    showMeetingStatus("NOT SAVED", -1, durationMs < 10000 ? "UNDER 10 SECONDS" : "RECORDING FAILED");
+    delay(1600);
     returnToReady();
     return;
   }

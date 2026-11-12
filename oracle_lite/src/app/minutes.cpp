@@ -604,6 +604,15 @@ void minutesLiveFinish(bool keep) {
     live.stop = true;
     while (live.running.load()) delay(10);
     sdRemoveIfExists(sidecarPath(live.noteNum).c_str());
+    // Part of it may already have streamed live: ask the server to drop that
+    // upload too (best effort; an older server simply ignores it).
+    if (live.rid.length() && live.sent.load() > 0 && WiFi.status() == WL_CONNECTED) {
+      Conn conn;
+      String body;
+      const int status = call(conn, "DELETE", "/api/uploads/" + live.rid, nullptr, nullptr, 0, nullptr, 0, -1,
+                              &body, 6000);
+      Serial.printf("[Meeting] discarded live upload %s on the server: HTTP %d\n", live.rid.c_str(), status);
+    }
     return;
   }
   setSidecarField(live.noteNum, "state", "recorded");
