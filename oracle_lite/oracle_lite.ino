@@ -2050,6 +2050,18 @@ void loop() {
     // Stays at full speed while awake: responsiveness first, sleep saves power.
   }
   serviceWakeWifi();
+  // The icon follows the real link, checked once a second. Connection events
+  // alone can mislead: trying several saved networks at a new location
+  // produces "disconnected" events for the ones that failed, and one can
+  // arrive after the network that did connect.
+  {
+    static uint32_t nextLinkCheck = 0;
+    if (static_cast<int32_t>(millis() - nextLinkCheck) >= 0) {
+      nextLinkCheck = millis() + 1000UL;
+      const bool linked = WiFi.status() == WL_CONNECTED && WiFi.localIP() != IPAddress(0, 0, 0, 0);
+      if (linked != wifiIndicatorState()) setWifiIndicator(linked);
+    }
+  }
   // Keep Home's Wi-Fi icon true to the last connection result, whichever
   // path (wake-up join, background sync, an action) changed it.
   if (state == STATE_IDLE && !setupRequired && homeWifiIconStale() && bothButtonsUp() &&
