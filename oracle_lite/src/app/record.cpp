@@ -360,6 +360,35 @@ bool playWavFile(const char* path) {
 // ─── Meeting minutes ───────────────────────────────────────────────────────
 // Records until the top button is pressed again (or the length/SD limit is
 // reached). Unlike notes, the button does not need to be held.
+void microphoneTest() {
+  int16_t* buf = (int16_t*)heap_caps_malloc(REC_BUF, MALLOC_CAP_8BIT);
+  if (!buf) { Serial.println("[MicTest] no memory"); return; }
+  audio_record_restart();   // open the microphone afresh
+  Serial.println("[MicTest] speak now: 5 seconds. Levels: quiet room ~50-300, speech ~1000-8000");
+  for (int second = 1; second <= 5; ++second) {
+    uint64_t left = 0, right = 0; uint32_t frames = 0, crossings = 0; int16_t peak = 0, previous = 0;
+    int failed = 0;
+    while (frames < SAMPLE_RATE) {
+      const int result = audio_playback_read((void*)buf, REC_BUF);
+      if (result != 0) { failed = result; break; }
+      for (int i = 0; i < REC_BUF / 4; ++i) {
+        const int16_t l = buf[i * 2], r = buf[i * 2 + 1];
+        left += static_cast<int64_t>(l) * l; right += static_cast<int64_t>(r) * r;
+        if ((l ^ previous) & 0x8000) ++crossings;
+        previous = l;
+        if (abs(l) > peak) peak = abs(l);
+      }
+      frames += REC_BUF / 4;
+    }
+    if (failed) { Serial.printf("[MicTest] read failed: %d (codec not answering)\n", failed); break; }
+    Serial.printf("[MicTest] %d s: left rms %.0f peak %d zcr %.2f | right rms %.0f\n", second,
+                  sqrt((double)left / frames), peak, (double)crossings / frames, sqrt((double)right / frames));
+  }
+  Serial.println("[MicTest] all ~0 = no signal (mic/wiring); rms >3000 with zcr >0.35 while quiet = static");
+  audio_idle_suspend();
+  heap_caps_free(buf);
+}
+
 bool recordMeeting(const char* path, uint32_t& durationMs, void (*onFlushed)(uint32_t)) {
   constexpr uint32_t kMaxMeetingMs = 4UL * 60UL * 60UL * 1000UL;  // ~230 MB
   constexpr uint32_t kScreenEveryMs = 60000UL;

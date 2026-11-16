@@ -172,6 +172,7 @@ void replyUsbSetup(const char* status, const char* detail = nullptr) {
 }
 
 void applyUsbSetupLine(const String& line) {
+  if (line.equalsIgnoreCase("MICTEST")) { microphoneTest(); resetActivity(); return; }
   if (!line.startsWith("ORACLE_SETUP_V1 ")) return;
   if (line.length() > 700) { replyUsbSetup("ERROR", "TOO_LONG"); return; }
 

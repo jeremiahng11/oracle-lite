@@ -16,4 +16,6 @@ bool recordQuestionUntilSilence(const char* path, uint32_t maxMs,
 bool playWavFile(const char* path);
 // Records a meeting until the top button is pressed again. onFlushed(bytes) is
 // called whenever the file durably holds `bytes` bytes (for live streaming).
+// Serial "MICTEST": 5 s of microphone levels (both channels) on the serial log.
+void microphoneTest();
 bool recordMeeting(const char* path, uint32_t& durationMs, void (*onFlushed)(uint32_t) = nullptr);
