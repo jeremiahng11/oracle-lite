@@ -1,3 +1,4 @@
+#include <math.h>
 #include "Arduino.h"
 #include "sd_read.h"
 #include "../../config.h"
@@ -389,6 +390,8 @@ bool recordMeeting(const char* path, uint32_t& durationMs, void (*onFlushed)(uin
   uint32_t stopDownSince = 0;
   bool audioOk = true;
   bool liveShown = false;
+  uint64_t staticEnergy = 0;
+  uint32_t staticCrossings = 0, staticSamples = 0, staticSeconds = 0, micRestarts = 0;
 
   while (true) {
     if (audio_playback_read((void*)sbuf, REC_BUF) != 0) {
@@ -398,6 +401,34 @@ bool recordMeeting(const char* path, uint32_t& durationMs, void (*onFlushed)(uin
     }
     const int mono = REC_BUF / 4;
     for (int i = 0; i < mono; i++) mbuf[i] = sbuf[i * 2];
+    // Static guard: if the microphone stream slips out of step with the codec,
+    // every sample becomes loud full-band noise (no speech can be heard) until
+    // the microphone is reopened. Real rooms are never loud AND that noisy for
+    // seconds on end, so after 3 s of it the microphone is restarted.
+    {
+      uint64_t energy = 0;
+      int crossings = 0;
+      for (int i = 0; i < mono; i++) {
+        energy += static_cast<int64_t>(mbuf[i]) * mbuf[i];
+        if (i && ((mbuf[i] ^ mbuf[i - 1]) & 0x8000)) crossings++;
+      }
+      staticEnergy += energy;
+      staticCrossings += crossings;
+      staticSamples += mono;
+      if (staticSamples >= SAMPLE_RATE) {   // judge each second
+        const double rms = sqrt(static_cast<double>(staticEnergy) / staticSamples);
+        const double zcr = static_cast<double>(staticCrossings) / staticSamples;
+        staticSeconds = (rms > 3000.0 && zcr > 0.35) ? staticSeconds + 1 : 0;
+        if (staticSeconds >= 3) {
+          Serial.printf("[Meeting] static at %lu s (rms %.0f, zcr %.2f): restarting microphone\n",
+                        (unsigned long)((millis() - t0) / 1000), rms, zcr);
+          audio_record_restart();
+          staticSeconds = 0;
+          ++micRestarts;
+        }
+        staticEnergy = 0; staticCrossings = 0; staticSamples = 0;
+      }
+    }
     const size_t written = f.write((uint8_t*)mbuf, mono * 2);
     if (written != (size_t)(mono * 2)) {
       audioOk = false;
@@ -456,8 +487,8 @@ bool recordMeeting(const char* path, uint32_t& durationMs, void (*onFlushed)(uin
   // Let go of the stop press before returning so it is not seen as a new tap.
   const uint32_t releaseBy = millis() + 3000;
   while (digitalRead(BTN_REC) == LOW && static_cast<int32_t>(releaseBy - millis()) > 0) delay(5);
-  Serial.printf("[Meeting] done: %lu bytes, %lu s\n", (unsigned long)totalMono,
-                (unsigned long)(durationMs / 1000));
+  Serial.printf("[Meeting] done: %lu bytes, %lu s, microphone restarts %lu\n", (unsigned long)totalMono,
+                (unsigned long)(durationMs / 1000), (unsigned long)micRestarts);
   // Under 10 s is an accidental start: don't keep it.
   if (totalMono < SAMPLE_RATE * 2 * 10) {
     sdRemoveIfExists(path);

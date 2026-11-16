@@ -26,6 +26,12 @@ void audio_idle_suspend(void)
     if (playback_open && esp_codec_dev_close(playback) == ESP_CODEC_DEV_OK) playback_open = false;
 }
 
+// Closes only the microphone; the next read reopens it in step with the codec.
+void audio_record_restart(void)
+{
+    if (record_open && esp_codec_dev_close(record) == ESP_CODEC_DEV_OK) record_open = false;
+}
+
 void audio_prepare_sleep(void)
 {
     // Close both directions while the codec still has power. Muting alone
