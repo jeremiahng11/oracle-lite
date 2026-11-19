@@ -13,7 +13,7 @@ Use the supported 8/8 MB board revision. Older 4/2 MB boards are unsupported.
 The touch version (ESP32-S3-Touch-ePaper-1.54) runs the same firmware. Oracle finds its
 FT6336 touch chip at start-up: a tap on the upper half of the screen acts as a top-button
 tap, a tap on the lower half as a bottom-button tap (double and triple taps too). Holds
-(record, Ask, Web Companion) stay on the buttons. If the halves are the wrong way round,
+(record, Ask, Web Companion) stay on the buttons. On an answer or briefing, a tap anywhere shows the next page. If the halves are the wrong way round,
 send `TOUCHFLIP` on the serial monitor.
 
 ## Build and upload

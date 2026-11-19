@@ -1,4 +1,5 @@
 #include "touch.h"
+#include <atomic>
 #include "Arduino.h"
 #include "../../config.h"
 #include "settings.h"
@@ -9,6 +10,7 @@ void injectButtonTap(bool upper);   // oracle_lite.ino
 namespace {
 i2c_master_dev_handle_t touchDev = nullptr;
 bool present = false;
+std::atomic<uint32_t> screenTaps{0};
 
 bool readPoint(uint16_t& x, uint16_t& y, uint8_t& points) {
   uint8_t reg = 0x02, buf[5] = {};
@@ -39,6 +41,7 @@ void touchTask(void*) {
         bool upper = startY < EPD_HEIGHT / 2;
         if (oracleTouchFlipped()) upper = !upper;
         Serial.printf("[Touch] tap (%u,%u) -> %s button\n", startX, startY, upper ? "top" : "bottom");
+        screenTaps.fetch_add(1);
         injectButtonTap(upper);
       }
     }
@@ -48,6 +51,8 @@ void touchTask(void*) {
 }  // namespace
 
 bool touchPresent() { return present; }
+
+uint32_t touchTakeTaps() { return screenTaps.exchange(0); }
 
 bool touchBegin() {
   i2c_master_bus_handle_t bus = i2c_bsp_bus();

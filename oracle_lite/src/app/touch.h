@@ -7,3 +7,6 @@
 // screen works by touch exactly as by buttons. Holds stay on the buttons.
 bool touchBegin();
 bool touchPresent();
+// Screen taps since the last call (any half). Screens that page through
+// text (answers, briefings) use this: any tap = next page.
+uint32_t touchTakeTaps();

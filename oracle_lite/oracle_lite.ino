@@ -636,7 +636,15 @@ bool browseAnswerPages(const String& answer, int sourceCount, bool allowFollowUp
   bool lowerArmed = !lowerWasDown;   // a press still held from before is not a new one
   uint32_t lowerDownAt = 0;
   uint32_t closesAt = millis() + 15000UL;
+  touchTakeTaps();   // touches from before this screen don't count
   while (static_cast<int32_t>(millis() - closesAt) < 0) {
+    // Touch version: tapping anywhere on the screen shows the next page.
+    if (touchTakeTaps()) {
+      clearLatchedPresses();   // the tap is used here, not as a button press later
+      page = (page + 1) % pages;
+      showPage(page);
+      closesAt = millis() + 15000UL;
+    }
     if (digitalRead(BTN_REC) == HIGH) upperArmed = true;
     else if (upperArmed) {
       break;
