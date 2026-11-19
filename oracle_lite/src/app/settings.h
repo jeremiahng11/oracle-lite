@@ -48,6 +48,9 @@ bool oracleSetApPassword(bool fixed, const String& password);
 // Names/terms the transcription should spell exactly ("Manco, Aleta, ...").
 String oracleVocabulary();
 bool oracleSetVocabulary(const String& words);
+// Touch version: swap which screen half acts as the top / bottom button.
+bool oracleTouchFlipped();
+bool oracleSetTouchFlipped(bool flipped);
 bool oracleHasMinutesKey();
 bool oracleSaveMinutes(const String& url, const String& apiKey);
 bool oracleClearMinutesKey();

@@ -22,6 +22,7 @@ extern "C" {
 #include "src/app/network.h"
 #include "src/app/notes.h"
 #include "src/app/record.h"
+#include "src/app/touch.h"
 #include "src/app/minutes.h"
 bool restoreFrameAfterWake();   // draw.cpp
 #include "esp_heap_caps.h"
@@ -173,6 +174,11 @@ void replyUsbSetup(const char* status, const char* detail = nullptr) {
 
 void applyUsbSetupLine(const String& line) {
   if (line.equalsIgnoreCase("MICTEST")) { microphoneTest(); resetActivity(); return; }
+  if (line.equalsIgnoreCase("TOUCHFLIP")) {   // touch halves the wrong way round
+    oracleSetTouchFlipped(!oracleTouchFlipped());
+    Serial.printf("[Touch] halves %s\n", oracleTouchFlipped() ? "flipped" : "normal");
+    return;
+  }
   if (!line.startsWith("ORACLE_SETUP_V1 ")) return;
   if (line.length() > 700) { replyUsbSetup("ERROR", "TOO_LONG"); return; }
 
@@ -251,6 +257,21 @@ void IRAM_ATTR latchUpperPress() {
 }
 void IRAM_ATTR latchLowerPress() {
   buttonEdge(BTN_PWR, lowerPressLatched, lowerTapEdges, lowerTapEdgeAt, lowerReleasedAt);
+}
+
+// Touch version: a screen tap counts exactly like a quick button tap.
+// Runs on the loop's core, so masking interrupts orders it with the ISRs.
+void touchTapAction(bool upper) {
+  noInterrupts();
+  const uint32_t now = millis();
+  if (upper) {
+    upperPressLatched = true; if (upperTapEdges < 9) upperTapEdges++;
+    upperTapEdgeAt = now; upperReleasedAt = now;
+  } else {
+    lowerPressLatched = true; if (lowerTapEdges < 9) lowerTapEdges++;
+    lowerTapEdgeAt = now; lowerReleasedAt = now;
+  }
+  interrupts();
 }
 
 void clearLatchedPresses() {
@@ -1911,6 +1932,8 @@ void initializeStorage(bool recoverOrphans) {
 
 }  // namespace
 
+void injectButtonTap(bool upper) { touchTapAction(upper); }
+
 void setup() {
   // Start-up timing in the serial log ("[Boot] audio at 812 ms").
   auto bootStep = [](const char* what) {
@@ -1963,6 +1986,7 @@ void setup() {
   }
 
   i2c_master_Init();
+  touchBegin();   // touch version only; harmless on the button-only board
   rtcSyncSystemFromChip();
   bootStep("display + clock");
 

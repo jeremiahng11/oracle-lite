@@ -373,6 +373,16 @@ String oracleVocabulary() {
   return prefs.getString("vocab", "");
 }
 
+bool oracleTouchFlipped() {
+  oracleSettingsBegin();
+  return ready && prefs.getBool("touch_flip", false);
+}
+
+bool oracleSetTouchFlipped(bool flipped) {
+  oracleSettingsBegin();
+  return ready && prefs.putBool("touch_flip", flipped) == 1;
+}
+
 bool oracleSetVocabulary(const String& words) {
   oracleSettingsBegin();
   if (!ready) return false;

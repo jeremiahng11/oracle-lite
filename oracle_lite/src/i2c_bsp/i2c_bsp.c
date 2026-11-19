@@ -10,6 +10,8 @@ i2c_master_dev_handle_t shtc3_handle = NULL;
 static uint32_t i2c_data_pdMS_TICKS = 0;
 static uint32_t i2c_done_pdMS_TICKS = 0;
 
+i2c_master_bus_handle_t i2c_bsp_bus(void) { return user_i2c_handle; }
+
 void i2c_master_Init(void)
 {
 	i2c_data_pdMS_TICKS = pdMS_TO_TICKS(5000);

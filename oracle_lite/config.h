@@ -30,6 +30,11 @@
 #define ext_wakeup_pin_1 GPIO_NUM_18
 
 /* I2C bus */
+// Touch version (ESP32-S3-Touch-ePaper-1.54): FT6336 on the same I2C bus.
+// Detected at boot, so one firmware runs on both boards.
+#define TOUCH_INT_PIN      21
+#define TOUCH_RST_PIN      7
+#define TOUCH_I2C_ADDRESS  0x38
 #define ESP32_I2C_SDA_PIN GPIO_NUM_47
 #define ESP32_I2C_SCL_PIN GPIO_NUM_48
 
