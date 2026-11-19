@@ -10,11 +10,15 @@ Firmware version: see `version.txt`. Each `pio run -t upload` raises the rc numb
 Waveshare ESP32-S3-ePaper-1.54 with 8 MB flash, 8 MB OPI PSRAM and a microSD card.
 Use the supported 8/8 MB board revision. Older 4/2 MB boards are unsupported.
 
-The touch version (ESP32-S3-Touch-ePaper-1.54) runs the same firmware. Oracle finds its
-FT6336 touch chip at start-up: a tap on the upper half of the screen acts as a top-button
-tap, a tap on the lower half as a bottom-button tap (double and triple taps too). Holds
-(record, Ask, Web Companion) stay on the buttons. On an answer or briefing, a tap anywhere shows the next page. If the halves are the wrong way round,
-send `TOUCHFLIP` on the serial monitor.
+The touch version (ESP32-S3-Touch-ePaper-1.54) runs the same firmware; Oracle finds its
+FT6336 touch chip at start-up.
+- Home: tap the TASKS row (or anything above it) for tasks, the EVENTS row for appointments.
+  Double and triple taps work like the buttons (briefings, minutes, web question).
+- Lists, answers and briefings: tap the right side or swipe left for next, tap the left side
+  or swipe right for previous, swipe down to go back to Home.
+- Every tap clicks at once, before the e-paper redraws.
+- Holds (record, Ask, Web Companion) stay on the buttons. Touch never wakes Oracle from sleep.
+- If touch is the wrong way round, send `TOUCHFLIP` on the serial monitor.
 
 ## Build and upload
 

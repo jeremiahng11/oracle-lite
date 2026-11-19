@@ -64,6 +64,8 @@ void resetActivity();
 enum class PressResult { Released, LongSingle, Chord };
 
 namespace {
+// Home (touch version): taps above this line open Tasks, below it Events.
+constexpr int kHomeTouchSplitY = 143;
 
 bool companionExitArmed = false;
 bool idleInputArmed = true;
@@ -636,14 +638,20 @@ bool browseAnswerPages(const String& answer, int sourceCount, bool allowFollowUp
   bool lowerArmed = !lowerWasDown;   // a press still held from before is not a new one
   uint32_t lowerDownAt = 0;
   uint32_t closesAt = millis() + 15000UL;
-  touchTakeTaps();   // touches from before this screen don't count
+  // Touch version: right side / swipe left = next page, left side / swipe
+  // right = previous, swipe down = close.
+  touchSetMode(TouchMode::Pages);
+  bool closeByTouch = false;
   while (static_cast<int32_t>(millis() - closesAt) < 0) {
-    // Touch version: tapping anywhere on the screen shows the next page.
-    if (touchTakeTaps()) {
-      clearLatchedPresses();   // the tap is used here, not as a button press later
-      page = (page + 1) % pages;
-      showPage(page);
-      closesAt = millis() + 15000UL;
+    if (touchPresent()) {
+      touchServiceClick(audioPlaying);
+      const TouchEvent e = touchTakeEvent();
+      if (e == TouchEvent::Home) { closeByTouch = true; break; }
+      if (e == TouchEvent::Next || e == TouchEvent::Previous) {
+        page = (page + (e == TouchEvent::Next ? 1 : pages - 1)) % pages;
+        showPage(page);
+        closesAt = millis() + 15000UL;
+      }
     }
     if (digitalRead(BTN_REC) == HIGH) upperArmed = true;
     else if (upperArmed) {
@@ -668,12 +676,17 @@ bool browseAnswerPages(const String& answer, int sourceCount, bool allowFollowUp
         lowerDownAt = 0;
       } else if (lowerArmed) {
         if (!lowerWasDown) lowerDownAt = millis();
-        else if (lowerDownAt && millis() - lowerDownAt >= BTN_LONG_MS) return true;
+        else if (lowerDownAt && millis() - lowerDownAt >= BTN_LONG_MS) {
+          touchSetMode(TouchMode::Buttons);
+          return true;
+        }
       }
     }
     lowerWasDown = lowerDown;
     delay(10);
   }
+  (void)closeByTouch;
+  touchSetMode(TouchMode::Buttons);
   return false;
 }
 
@@ -1600,6 +1613,25 @@ void handleAgenda() {
   }
   companionGestureStartedAt = 0;
 
+  // Touch version: right side / swipe left = next, left side / swipe right =
+  // previous, swipe down = Home.
+  if (touchPresent()) {
+    const TouchEvent e = touchTakeEvent();
+    if (e != TouchEvent::None) {
+      resetActivity();
+      const int pages = todayAgendaPageCount(agendaShowsEvents);
+      if (e == TouchEvent::Home || (e == TouchEvent::Next && agendaPage + 1 >= pages)) {
+        returnToReady();
+        return;
+      }
+      if (e == TouchEvent::Previous && agendaPage == 0) return;
+      agendaPage += e == TouchEvent::Next ? 1 : -1;
+      agendaShownAt = millis();
+      showTodayAgenda(agendaShowsEvents, agendaPage);
+      return;
+    }
+  }
+
   const bool upperLatched = upperPressLatched;
   const bool lowerLatched = lowerPressLatched;
   if (digitalRead(BTN_REC) == LOW || (upperLatched && !lowerLatched)) {
@@ -2046,6 +2078,13 @@ void setup() {
 
 void loop() {
   handleUsbSetup();
+  if (touchPresent()) {
+    touchServiceClick(audioPlaying);
+    // Home splits between the TASKS and EVENTS rows; lists page by touch.
+    if (state == STATE_AGENDA) touchSetMode(TouchMode::Pages);
+    else if (state == STATE_IDLE) touchSetMode(TouchMode::Buttons, kHomeTouchSplitY);
+    else touchSetMode(TouchMode::Buttons);
+  }
 
   // Companion must also be serviced on a device that still needs setup.
   if (state == STATE_TRANSFER) {

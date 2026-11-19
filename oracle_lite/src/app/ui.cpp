@@ -1,3 +1,4 @@
+#include "touch.h"
 #include "ui.h"
 #include "../../globals.h"
 #include "draw.h"
@@ -516,6 +517,8 @@ static void drawHome(int taskCount, int eventCount, int batteryPercent) {
   labelLeft(159, uiText("TERMINE", "EVENTS"), 1, BLACK, 120);
   snprintf(count, sizeof(count), "%d", min(eventCount, 999));
   labelRight(155, count, 2, BLACK, 48);
+  // Touch version: say what a tap does (Tasks row / Events row).
+  if (touchPresent()) drawFooterCentered(uiText("ZEILE ANTIPPEN", "TAP A ROW"), BLACK);
   refreshAtRest();
 }
 
