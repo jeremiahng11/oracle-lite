@@ -941,6 +941,9 @@ void leaveCompanion() {
   companionSinglePin = -1;
   state = STATE_IDLE;
   idleInputArmed = false;
+  // Setup done in the Companion (Wi-Fi + OpenAI key saved): leave setup mode
+  // now instead of only after a restart.
+  setupRequired = !oracleHasWifi() || !oracleHasOpenAiKey();
   clearLatchedPresses();
   resetActivity();
   renderReadyHome();
